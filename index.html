@@ -1,0 +1,1359 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>TaskFlow — Project Manager</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet"/>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0c0d0f; --surface: #141517; --surface2: #1c1d20; --surface3: #242528;
+  --border: #2a2b2f; --border2: #353638;
+  --text: #e8e9ec; --text2: #9a9ba0; --text3: #5a5b60;
+  --accent: #e8ff47; --accent2: #b8cc30;
+  --todo: #4a9eff; --prog: #ff8c42; --done: #4ade80;
+  --todo-dim: rgba(74,158,255,0.15); --prog-dim: rgba(255,140,66,0.15); --done-dim: rgba(74,222,128,0.15);
+  --font: 'Syne', sans-serif; --mono: 'DM Mono', monospace;
+  --r: 8px; --shadow: 0 4px 24px rgba(0,0,0,0.4);
+}
+html,body { height:100%; }
+body { font-family:var(--font); background:var(--bg); color:var(--text); overflow:hidden; height:100vh; }
+#root { height:100vh; display:flex; flex-direction:column; }
+
+/* HEADER */
+.header { display:flex; align-items:center; gap:16px; padding:0 24px; height:56px;
+  border-bottom:1px solid var(--border); background:var(--surface); flex-shrink:0; }
+.logo { font-size:18px; font-weight:800; letter-spacing:-0.5px; color:var(--accent);
+  display:flex; align-items:center; gap:6px; }
+.logo-dot { width:8px; height:8px; background:var(--accent); border-radius:50%; }
+.tab-group { display:flex; gap:2px; background:var(--surface2); border-radius:var(--r); padding:3px; }
+.tab { padding:5px 16px; border-radius:6px; border:none; cursor:pointer;
+  font-family:var(--font); font-size:13px; font-weight:600;
+  color:var(--text2); background:transparent; transition:all 0.15s; }
+.tab:hover { color:var(--text); }
+.tab.active { background:var(--surface3); color:var(--accent); }
+.hdr-count { font-family:var(--mono); font-size:12px; color:var(--text3);
+  padding:4px 10px; background:var(--surface2); border-radius:20px; }
+.btn-primary { display:flex; align-items:center; gap:6px; padding:7px 16px;
+  border-radius:var(--r); border:none; background:var(--accent); color:var(--bg);
+  font-family:var(--font); font-size:13px; font-weight:700; cursor:pointer; transition:background 0.15s; }
+.btn-primary:hover { background:var(--accent2); }
+.btn-secondary { padding:7px 14px; border-radius:var(--r); border:1px solid var(--border);
+  background:transparent; color:var(--text2); font-family:var(--font); font-size:13px; font-weight:600;
+  cursor:pointer; transition:all 0.15s; }
+.btn-secondary:hover { border-color:var(--border2); color:var(--text); }
+.spacer { flex:1; }
+
+.main { flex:1; overflow:hidden; display:flex; flex-direction:column; }
+.layout { display:flex; height:100%; overflow:hidden; }
+
+/* SIDEBAR */
+.sidebar { flex-shrink:0; border-right:1px solid var(--border);
+  background:var(--surface); display:flex; flex-direction:column; overflow:hidden;
+  transition:width 0.22s cubic-bezier(.4,0,.2,1); }
+.sidebar.open  { width:260px; }
+.sidebar.closed { width:48px; }
+
+/* Toggle button */
+.sidebar-toggle { width:48px; height:48px; flex-shrink:0; display:flex; align-items:center; justify-content:center;
+  border-bottom:1px solid var(--border); cursor:pointer; color:var(--text3); font-size:16px;
+  transition:color 0.15s; user-select:none; }
+.sidebar-toggle:hover { color:var(--accent); }
+
+/* Collapsed icon list */
+.sidebar-icons { display:flex; flex-direction:column; align-items:center; padding:8px 0; gap:4px; overflow:hidden; }
+.sidebar-icon-btn { width:32px; height:32px; border-radius:8px; border:none; background:transparent;
+  cursor:pointer; display:flex; align-items:center; justify-content:center;
+  font-size:13px; transition:all 0.12s; position:relative; }
+.sidebar-icon-btn:hover { background:var(--surface2); }
+.sidebar-icon-dot { width:10px; height:10px; border-radius:3px; }
+.sidebar-icon-tooltip { position:absolute; left:40px; top:50%; transform:translateY(-50%);
+  background:var(--surface3); border:1px solid var(--border2); border-radius:6px;
+  padding:5px 10px; font-size:12px; font-weight:600; white-space:nowrap; color:var(--text);
+  pointer-events:none; opacity:0; transition:opacity 0.15s; z-index:50;
+  box-shadow:0 4px 16px rgba(0,0,0,0.4); }
+.sidebar-icon-btn:hover .sidebar-icon-tooltip { opacity:1; }
+
+/* Open panel */
+.sidebar-inner { flex:1; overflow:hidden; display:flex; flex-direction:column; min-width:0; }
+.sidebar-hdr { padding:14px 16px 10px; border-bottom:1px solid var(--border); flex-shrink:0; }
+.sidebar-title { font-size:11px; font-weight:700; text-transform:uppercase;
+  letter-spacing:0.5px; color:var(--text3); margin-bottom:10px; }
+.btn-add-bl { width:100%; padding:8px; border-radius:var(--r); border:1px dashed var(--border2);
+  background:transparent; color:var(--text3); font-family:var(--font); font-size:12px; font-weight:600;
+  cursor:pointer; transition:all 0.15s; display:flex; align-items:center; justify-content:center; gap:5px; }
+.btn-add-bl:hover { border-color:var(--accent); color:var(--accent); }
+.sidebar-list { flex:1; overflow-y:auto; padding:8px; }
+.sidebar-list::-webkit-scrollbar { width:4px; }
+.sidebar-list::-webkit-scrollbar-thumb { background:var(--border2); border-radius:2px; }
+.bl-item { border-radius:10px; border:1px solid var(--border); overflow:hidden; margin-bottom:8px; transition:border-color 0.15s; }
+.bl-item-hdr { display:flex; align-items:center; gap:8px; padding:10px 12px;
+  cursor:pointer; transition:background 0.12s; user-select:none; }
+.bl-item-hdr:hover { background:var(--surface2); }
+.bl-color { width:10px; height:10px; border-radius:3px; flex-shrink:0; }
+.bl-name { font-size:13px; font-weight:600; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.bl-cnt { font-family:var(--mono); font-size:10px; color:var(--text3);
+  background:var(--surface2); padding:2px 6px; border-radius:10px; }
+.bl-mini-btn { width:22px; height:22px; border:none; background:transparent; color:var(--text3);
+  cursor:pointer; border-radius:4px; display:flex; align-items:center; justify-content:center;
+  font-size:11px; transition:all 0.12s; }
+.bl-mini-btn:hover { background:var(--surface3); color:var(--text); }
+.bl-chevron { font-size:10px; color:var(--text3); transition:transform 0.15s; flex-shrink:0; }
+.bl-chevron.open { transform:rotate(90deg); }
+.bl-tasks { padding:0 8px 8px; display:flex; flex-direction:column; gap:4px; }
+.bl-task-row { display:flex; align-items:center; gap:7px; padding:6px 8px;
+  border-radius:6px; cursor:pointer; transition:background 0.12s; }
+.bl-task-row:hover { background:var(--surface2); }
+.t-status-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+.bl-task-name { font-size:12px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.bl-task-date { font-family:var(--mono); font-size:10px; color:var(--text3); }
+.bl-add-task { display:flex; align-items:center; gap:5px; padding:5px 8px;
+  font-size:12px; color:var(--text3); cursor:pointer; border-radius:6px;
+  transition:all 0.12s; margin-top:2px; }
+.bl-add-task:hover { color:var(--accent); background:rgba(232,255,71,0.06); }
+
+/* CONTENT */
+.content { flex:1; overflow:hidden; display:flex; flex-direction:column; }
+
+/* KANBAN */
+.kanban { display:flex; gap:16px; padding:20px; height:100%; overflow:hidden; }
+.kanban-col { flex:1; display:flex; flex-direction:column; background:var(--surface);
+  border-radius:12px; border:1px solid var(--border); overflow:hidden; min-width:0; }
+.kanban-col.drag-over { border-color:var(--accent); }
+.col-header { display:flex; align-items:center; justify-content:space-between;
+  padding:14px 16px; border-bottom:1px solid var(--border); flex-shrink:0; }
+.col-label { display:flex; align-items:center; gap:8px;
+  font-size:13px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; }
+.col-dot { width:8px; height:8px; border-radius:50%; }
+.col-count { font-family:var(--mono); font-size:11px; color:var(--text3);
+  background:var(--surface2); padding:2px 7px; border-radius:10px; }
+.col-tasks { flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:8px; }
+.col-tasks::-webkit-scrollbar { width:4px; }
+.col-tasks::-webkit-scrollbar-thumb { background:var(--border2); border-radius:2px; }
+.task-card { background:var(--surface2); border:1px solid var(--border); border-radius:10px;
+  padding:12px 14px; cursor:grab; transition:all 0.15s; user-select:none; }
+.task-card:hover { border-color:var(--border2); transform:translateY(-1px); box-shadow:var(--shadow); }
+.task-card.dragging { opacity:0.5; cursor:grabbing; }
+.task-card-bl { font-size:10px; font-weight:700; padding:2px 7px; border-radius:4px;
+  display:inline-block; margin-bottom:6px; }
+.task-card-title { font-size:14px; font-weight:600; margin-bottom:5px; line-height:1.3; }
+.task-card-desc { font-size:12px; color:var(--text2); margin-bottom:10px; line-height:1.5;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.task-card-footer { display:flex; align-items:center; justify-content:space-between; }
+.task-card-dates { font-family:var(--mono); font-size:11px; color:var(--text3); }
+.status-bar { height:3px; border-radius:0 0 10px 10px; margin:-1px -1px -1px; }
+.empty-col { flex:1; display:flex; align-items:center; justify-content:center;
+  font-size:12px; color:var(--text3); flex-direction:column; gap:6px; }
+.col-add-btn { width:100%; padding:8px; border-radius:8px; border:1px dashed var(--border2);
+  background:transparent; color:var(--text3); font-family:var(--font); font-size:12px; font-weight:600;
+  cursor:pointer; transition:all 0.15s; flex-shrink:0; margin-top:4px; }
+.col-add-btn:hover { border-color:var(--accent); color:var(--accent); background:rgba(232,255,71,0.04); }
+
+/* DEADLINE BADGES */
+.deadline-badge { display:inline-flex; align-items:center; gap:3px;
+  font-family:var(--mono); font-size:10px; font-weight:700;
+  padding:2px 6px; border-radius:4px; }
+.deadline-badge.overdue  { background:rgba(255,60,60,0.15);  color:#ff4444; }
+.deadline-badge.due-today{ background:rgba(255,180,0,0.15);  color:#ffb400; }
+/* card border tint */
+.task-card.overdue   { border-color: rgba(255,60,60,0.4); }
+.task-card.due-today { border-color: rgba(255,180,0,0.4); }
+/* gantt bar overlay stripe for overdue */
+.gantt-bar.overdue { filter:brightness(0.75) saturate(0.6); }
+.gantt-bar.due-today { outline: 2px solid #ffb400; outline-offset:1px; }
+
+/* GANTT */
+.gantt-container { display:flex; flex-direction:column; height:100%; background:var(--surface); overflow:hidden; position:relative; }
+.gantt-toolbar { display:flex; align-items:center; gap:12px; padding:12px 20px;
+  border-bottom:1px solid var(--border); flex-shrink:0; }
+.gantt-toolbar-title { font-size:14px; font-weight:700; color:var(--text2); }
+.gantt-nav { display:flex; gap:4px; }
+.nav-btn { width:28px; height:28px; border-radius:6px; border:1px solid var(--border);
+  background:var(--surface2); color:var(--text2); cursor:pointer;
+  display:flex; align-items:center; justify-content:center; font-size:14px; transition:all 0.15s; }
+.nav-btn:hover { border-color:var(--accent); color:var(--accent); }
+.gantt-period { font-family:var(--mono); font-size:13px; font-weight:500;
+  padding:5px 12px; background:var(--surface2); border-radius:6px; }
+.gantt-hints { display:flex; gap:6px; margin-left:auto; flex-wrap:wrap; }
+.gantt-hint-chip { font-size:10px; color:var(--text3); background:var(--surface2);
+  border:1px solid var(--border); padding:3px 8px; border-radius:20px; }
+.gantt-body { display:flex; flex:1; overflow:hidden; }
+.gantt-left { width:260px; flex-shrink:0; border-right:1px solid var(--border);
+  display:flex; flex-direction:column; overflow:hidden; }
+.gantt-left-header { height:40px; padding:0 14px; display:flex; align-items:center;
+  border-bottom:1px solid var(--border); flex-shrink:0;
+  font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--text3); }
+.gantt-left-rows { flex:1; overflow-y:auto; overflow-x:hidden; }
+.gantt-left-rows::-webkit-scrollbar { display:none; }
+.gantt-group-row { height:36px; padding:0 14px; display:flex; align-items:center; gap:8px;
+  background:var(--surface2); border-bottom:1px solid var(--border); cursor:pointer; transition:background 0.12s; }
+.gantt-group-row:hover { background:var(--surface3); }
+.gantt-group-color { width:10px; height:10px; border-radius:3px; flex-shrink:0; }
+.gantt-group-name { font-size:12px; font-weight:700; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.gantt-group-count { font-family:var(--mono); font-size:10px; color:var(--text3); }
+.gantt-group-chevron { font-size:10px; color:var(--text3); transition:transform 0.15s; }
+.gantt-group-chevron.open { transform:rotate(90deg); }
+.gantt-row-label { height:48px; padding:0 10px 0 24px; display:flex; align-items:center; gap:8px;
+  border-bottom:1px solid var(--border); cursor:pointer; transition:background 0.12s; }
+.gantt-row-label:hover { background:var(--surface2); }
+.gantt-row-label:hover .gantt-row-edit-btn { opacity:1; }
+.gantt-row-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+.gantt-row-name { font-size:12px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.gantt-row-dates { font-family:var(--mono); font-size:10px; color:var(--text3); margin-top:1px; }
+.gantt-row-edit-btn { width:22px; height:22px; flex-shrink:0; border:none;
+  background:var(--surface3); color:var(--text2); border-radius:4px;
+  cursor:pointer; font-size:12px; opacity:0; transition:opacity 0.15s;
+  display:flex; align-items:center; justify-content:center; }
+.gantt-row-edit-btn:hover { color:var(--accent); }
+.gantt-row-add { height:36px; padding:0 14px 0 24px; display:flex; align-items:center; gap:6px;
+  border-bottom:1px solid var(--border); font-size:11px; color:var(--text3); cursor:pointer; transition:color 0.15s; }
+.gantt-row-add:hover { color:var(--accent); }
+.gantt-right { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+.gantt-scroll { flex:1; overflow:auto; position:relative; }
+.gantt-scroll::-webkit-scrollbar { height:6px; width:6px; }
+.gantt-scroll::-webkit-scrollbar-thumb { background:var(--border2); border-radius:3px; }
+.gantt-grid { position:relative; }
+.gantt-header-row { display:flex; position:sticky; top:0; z-index:10;
+  background:var(--surface); border-bottom:1px solid var(--border); height:40px; }
+.gantt-day-header { flex-shrink:0; height:40px; display:flex; align-items:center; justify-content:center;
+  border-right:1px solid var(--border); font-family:var(--mono); font-size:10px; color:var(--text3);
+  flex-direction:column; gap:1px; }
+.gantt-day-header.today { background:rgba(232,255,71,0.06); }
+.gantt-day-header.today .day-num { color:var(--accent); font-weight:700; }
+.day-num { font-size:12px; font-weight:500; }
+.day-name { font-size:9px; text-transform:uppercase; }
+.gantt-day-header.saturday { background:rgba(74,158,255,0.08); }
+.gantt-day-header.saturday .day-num { color:#4a9eff; }
+.gantt-day-header.saturday .day-name { color:#4a9eff; }
+.gantt-day-header.sunday { background:rgba(255,80,80,0.08); }
+.gantt-day-header.sunday .day-num { color:#ff5050; }
+.gantt-day-header.sunday .day-name { color:#ff5050; }
+.gantt-rows { position:relative; }
+.gantt-grid-group { height:36px; display:flex; align-items:center; position:relative;
+  border-bottom:1px solid var(--border); }
+.gantt-grid-group-cell { flex-shrink:0; height:100%; border-right:1px solid rgba(42,43,47,0.4); }
+.gantt-data-row { height:48px; display:flex; align-items:center; position:relative;
+  border-bottom:1px solid var(--border); }
+.gantt-cell { flex-shrink:0; height:100%; border-right:1px solid rgba(42,43,47,0.5); }
+.gantt-cell.saturday { background:rgba(74,158,255,0.05); }
+.gantt-cell.sunday { background:rgba(255,80,80,0.05); }
+.gantt-cell.today-col { background:rgba(232,255,71,0.04); }
+.gantt-bar-layer { position:absolute; top:0; left:0; right:0; bottom:0; pointer-events:none; z-index:2; }
+.gantt-bar { position:absolute; top:50%; transform:translateY(-50%);
+  height:28px; border-radius:6px; display:flex; align-items:stretch;
+  pointer-events:all; box-shadow:0 1px 4px rgba(0,0,0,0.3); overflow:visible; user-select:none; z-index:3; }
+.gantt-bar.is-dragging { opacity:0.85; box-shadow:0 6px 24px rgba(0,0,0,0.5); z-index:20; }
+.gantt-bar:hover .gantt-bar-resize { opacity:1; }
+.gantt-bar-inner { padding:0 6px; font-size:11px; font-weight:700;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  flex:1; color:rgba(0,0,0,0.85); cursor:grab; display:flex; align-items:center; gap:5px; border-radius:3px; }
+.gantt-bar-inner:active { cursor:grabbing; }
+.gantt-drag-dates { font-size:10px; background:rgba(0,0,0,0.15); padding:1px 5px; border-radius:3px; flex-shrink:0; }
+.gantt-bar-resize { width:9px; height:100%; flex-shrink:0; cursor:ew-resize; pointer-events:all;
+  background:rgba(0,0,0,0.18); display:flex; align-items:center; justify-content:center;
+  font-size:9px; color:rgba(0,0,0,0.5); opacity:0; transition:opacity 0.15s,background 0.15s; }
+.gantt-bar-resize:hover { background:rgba(0,0,0,0.32); opacity:1 !important; }
+.gantt-bar-resize-left { border-radius:6px 0 0 6px; }
+.gantt-bar-resize-right { border-radius:0 6px 6px 0; }
+.gantt-create-zone { position:absolute; top:0; left:0; right:0; bottom:0;
+  cursor:crosshair; pointer-events:all; z-index:1; }
+.gantt-create-preview { position:absolute; top:50%; transform:translateY(-50%);
+  height:28px; border-radius:6px; background:rgba(232,255,71,0.2); border:2px dashed var(--accent);
+  pointer-events:none; z-index:2; }
+.gantt-today-line { position:absolute; top:0; bottom:0; width:2px;
+  background:var(--accent); opacity:0.4; pointer-events:none; z-index:5; }
+.gantt-tooltip { position:fixed; z-index:200; pointer-events:none;
+  background:var(--surface3); border:1px solid var(--border2); border-radius:8px; padding:10px 12px;
+  box-shadow:0 8px 32px rgba(0,0,0,0.5); max-width:240px; }
+.gantt-tooltip-title { font-size:13px; font-weight:700; margin-bottom:3px; }
+.gantt-tooltip-bl { font-size:10px; font-weight:700; padding:1px 6px; border-radius:4px;
+  display:inline-block; margin-bottom:5px; }
+.gantt-tooltip-desc { font-size:11px; color:var(--text2); margin-bottom:5px; line-height:1.4; }
+.gantt-tooltip-dates { font-family:var(--mono); font-size:10px; color:var(--text3); }
+.gantt-popover { position:fixed; z-index:300; background:var(--surface2);
+  border:1px solid var(--border2); border-radius:12px; padding:16px;
+  box-shadow:0 16px 60px rgba(0,0,0,0.6); }
+.gantt-pop-hdr { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+.gantt-pop-status-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.gantt-pop-title { flex:1; background:transparent; border:none; outline:none;
+  color:var(--text); font-family:var(--font); font-size:15px; font-weight:700; padding:0; }
+.gantt-pop-close { width:24px; height:24px; border:none; background:transparent;
+  color:var(--text3); cursor:pointer; font-size:13px; border-radius:4px;
+  display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.gantt-pop-close:hover { background:var(--surface3); color:var(--text); }
+.gantt-pop-select { width:100%; padding:6px 8px; border-radius:6px;
+  border:1px solid var(--border); background:var(--surface3);
+  color:var(--text); font-family:var(--font); font-size:12px; outline:none; margin-bottom:10px; }
+.gantt-pop-select:focus { border-color:var(--accent); }
+.gantt-pop-desc { width:100%; background:var(--surface3); border:1px solid var(--border);
+  border-radius:6px; color:var(--text2); font-family:var(--font); font-size:12px;
+  padding:8px; outline:none; resize:none; margin-bottom:12px; line-height:1.4; }
+.gantt-pop-desc:focus { border-color:var(--accent); }
+.gantt-pop-row { margin-bottom:10px; }
+.gantt-pop-label { font-size:10px; font-weight:700; text-transform:uppercase;
+  letter-spacing:0.5px; color:var(--text3); display:block; margin-bottom:6px; }
+.gantt-status-group { display:flex; gap:5px; }
+.gantt-status-chip { padding:4px 9px; border-radius:20px; border:1px solid; cursor:pointer;
+  font-family:var(--font); font-size:11px; font-weight:600; background:transparent; transition:all 0.12s; }
+.gantt-pop-dates { display:flex; align-items:center; gap:6px; }
+.gantt-pop-date { flex:1; padding:6px 8px; border-radius:6px; border:1px solid var(--border);
+  background:var(--surface3); color:var(--text); font-family:var(--mono); font-size:11px; outline:none; }
+.gantt-pop-date:focus { border-color:var(--accent); }
+.gantt-pop-arrow { color:var(--text3); font-size:12px; }
+.gantt-pop-dur { font-family:var(--mono); font-size:11px; color:var(--text3);
+  text-align:right; margin-top:-4px; margin-bottom:10px; }
+.gantt-pop-actions { display:flex; gap:6px; padding-top:4px; }
+.gantt-pop-delete { padding:7px 12px; border-radius:6px; border:none;
+  background:rgba(255,80,80,0.12); color:#ff5050; font-family:var(--font); font-size:12px; font-weight:600;
+  cursor:pointer; transition:background 0.12s; }
+.gantt-pop-delete:hover { background:rgba(255,80,80,0.22); }
+.gantt-pop-save { flex:1; padding:7px 12px; border-radius:6px; border:none;
+  background:var(--accent); color:var(--bg); font-family:var(--font); font-size:12px; font-weight:700;
+  cursor:pointer; transition:background 0.12s; }
+.gantt-pop-save:hover { background:var(--accent2); }
+
+/* CALENDAR */
+.calendar-container { display:flex; flex-direction:column; height:100%; background:var(--surface); overflow:hidden; }
+.calendar-header { display:flex; align-items:center; gap:12px;
+  padding:12px 20px; border-bottom:1px solid var(--border); flex-shrink:0; }
+.calendar-title { font-size:18px; font-weight:700; }
+.cal-legend { display:flex; gap:12px; margin-left:auto; }
+.cal-legend-item { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--text2); }
+.cal-legend-dot { width:8px; height:8px; border-radius:50%; }
+.calendar-grid { flex:1; overflow-y:auto; display:flex; flex-direction:column; }
+.calendar-weekdays { display:grid; grid-template-columns:repeat(7,1fr);
+  border-bottom:1px solid var(--border); flex-shrink:0; }
+.cal-weekday { padding:8px 12px; font-size:11px; font-weight:700;
+  text-transform:uppercase; letter-spacing:0.5px; color:var(--text3); text-align:center; }
+.cal-weekday.saturday { color:#4a9eff; }
+.cal-weekday.sunday   { color:#ff5050; }
+.calendar-days { display:grid; grid-template-columns:repeat(7,1fr); flex:1; }
+.cal-day { border-right:1px solid var(--border); border-bottom:1px solid var(--border);
+  padding:8px; min-height:90px; overflow:hidden; }
+.cal-day:nth-child(7n) { border-right:none; }
+.cal-day.saturday { background:rgba(74,158,255,0.04); }
+.cal-day.sunday   { background:rgba(255,80,80,0.04); }
+.cal-day.saturday .cal-day-num { color:#4a9eff; }
+.cal-day.sunday   .cal-day-num { color:#ff5050; }
+.cal-day.other-month { opacity:0.3; }
+.cal-day.today .cal-day-num { background:var(--accent); color:var(--bg);
+  width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; }
+.cal-day-num { font-family:var(--mono); font-size:12px; font-weight:500; margin-bottom:4px; width:24px; text-align:center; }
+.cal-task-pill { font-size:10px; font-weight:600; padding:2px 6px; border-radius:4px;
+  margin-bottom:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  cursor:pointer; transition:filter 0.15s; }
+.cal-task-pill:hover { filter:brightness(1.2); }
+.cal-more { font-size:10px; color:var(--text3); margin-top:2px; }
+
+/* MODAL */
+.modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.7);
+  display:flex; align-items:center; justify-content:center;
+  z-index:100; backdrop-filter:blur(4px); animation:fadeIn 0.15s ease; }
+@keyframes fadeIn { from{opacity:0} to{opacity:1} }
+.modal { background:var(--surface2); border:1px solid var(--border2); border-radius:16px;
+  padding:28px; width:480px; max-width:90vw; box-shadow:0 24px 80px rgba(0,0,0,0.6);
+  animation:slideUp 0.2s ease; }
+@keyframes slideUp { from{transform:translateY(12px);opacity:0} to{transform:translateY(0);opacity:1} }
+.modal-title { font-size:18px; font-weight:700; margin-bottom:20px; }
+.form-group { margin-bottom:16px; }
+.form-label { font-size:11px; font-weight:700; text-transform:uppercase;
+  letter-spacing:0.5px; color:var(--text3); margin-bottom:6px; display:block; }
+.form-input,.form-textarea,.form-select { width:100%; padding:10px 12px; border-radius:8px;
+  border:1px solid var(--border); background:var(--surface3); color:var(--text);
+  font-family:var(--font); font-size:14px; transition:border-color 0.15s; outline:none; }
+.form-input:focus,.form-textarea:focus,.form-select:focus { border-color:var(--accent); }
+.form-textarea { resize:vertical; min-height:80px; line-height:1.5; }
+.form-row { display:flex; gap:12px; }
+.form-row .form-group { flex:1; }
+.modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:24px; }
+.btn-cancel { padding:9px 18px; border-radius:8px; border:1px solid var(--border);
+  background:transparent; color:var(--text2); cursor:pointer;
+  font-family:var(--font); font-size:14px; font-weight:600; transition:all 0.15s; }
+.btn-cancel:hover { border-color:var(--border2); color:var(--text); }
+.btn-save { padding:9px 20px; border-radius:8px; border:none; background:var(--accent); color:var(--bg);
+  cursor:pointer; font-family:var(--font); font-size:14px; font-weight:700; transition:background 0.15s; }
+.btn-save:hover { background:var(--accent2); }
+.btn-delete { padding:9px 16px; border-radius:8px; border:none;
+  background:rgba(255,80,80,0.15); color:#ff5050; cursor:pointer;
+  font-family:var(--font); font-size:14px; font-weight:600; transition:background 0.15s; margin-right:auto; }
+.btn-delete:hover { background:rgba(255,80,80,0.25); }
+.color-swatches { display:flex; gap:8px; flex-wrap:wrap; }
+.color-swatch { width:28px; height:28px; border-radius:6px; cursor:pointer;
+  border:2px solid transparent; transition:border-color 0.12s,transform 0.12s; }
+.color-swatch:hover { transform:scale(1.1); }
+.color-swatch.selected { border-color:var(--text); }
+/* HELP */
+.help-btn { width:28px; height:28px; border-radius:50%; border:1px solid var(--border);
+  background:var(--surface2); color:var(--text3); font-family:var(--mono); font-size:13px; font-weight:700;
+  cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all 0.15s; flex-shrink:0; }
+.help-btn:hover { border-color:var(--accent); color:var(--accent); }
+.help-modal { background:var(--surface2); border:1px solid var(--border2); border-radius:16px;
+  padding:28px; width:520px; max-width:92vw; max-height:80vh; overflow-y:auto;
+  box-shadow:0 24px 80px rgba(0,0,0,0.6); animation:slideUp 0.2s ease; }
+.help-modal::-webkit-scrollbar { width:4px; }
+.help-modal::-webkit-scrollbar-thumb { background:var(--border2); border-radius:2px; }
+.help-title { font-size:17px; font-weight:800; margin-bottom:4px; }
+.help-subtitle { font-size:12px; color:var(--text3); margin-bottom:20px; }
+.help-section { margin-bottom:20px; }
+.help-section-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.6px;
+  color:var(--accent); margin-bottom:10px; display:flex; align-items:center; gap:6px; }
+.help-row { display:flex; gap:10px; align-items:flex-start; margin-bottom:8px; }
+.help-icon { width:28px; height:28px; border-radius:6px; background:var(--surface3);
+  display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0; margin-top:1px; }
+.help-text { font-size:13px; color:var(--text2); line-height:1.6; }
+.help-text strong { color:var(--text); font-weight:600; }
+.help-divider { border:none; border-top:1px solid var(--border); margin:18px 0; }
+.help-close { width:100%; margin-top:4px; padding:10px; border-radius:8px; border:1px solid var(--border);
+  background:transparent; color:var(--text2); font-family:var(--font); font-size:14px; font-weight:600;
+  cursor:pointer; transition:all 0.15s; }
+.help-close:hover { border-color:var(--accent); color:var(--accent); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useRef, useEffect, useMemo } = React;
+
+const DAY_W = 40;
+const STATUSES = ['todo','inprogress','done'];
+const STATUS_LABELS = { todo:'To Do', inprogress:'In Progress', done:'Done' };
+const STATUS_COLORS = { todo:'var(--todo)', inprogress:'var(--prog)', done:'var(--done)' };
+const BL_COLORS = ['#7c6af7','#e8ff47','#ff8c42','#4a9eff','#4ade80','#f472b6','#fb923c','#a78bfa'];
+
+function fmt(d) { if(!d) return ''; return new Date(d).toLocaleDateString('ja-JP',{month:'short',day:'numeric'}); }
+function ds(d) { return d.toISOString().slice(0,10); }
+function addD(d,n) { const x=new Date(d); x.setDate(x.getDate()+n); return x; }
+function diff(a,b) { return Math.round((new Date(b)-new Date(a))/86400000); }
+function tod() { return ds(new Date()); }
+function uid() { return Date.now().toString(36)+Math.random().toString(36).slice(2); }
+
+const INIT_BL = [
+  {id:'bl1',name:'サンプルバックログ',color:'#7c6af7'},
+];
+const INIT_TASKS = [
+  {id:'t1',blId:'bl1',title:'サンプルタスク',description:'これはサンプルのタスクです',status:'todo',start:ds(new Date()),end:ds(addD(new Date(),7))},
+];
+
+// deadline: 'overdue' | 'due-today' | null  (doneタスクは対象外)
+function deadlineStatus(task) {
+  if(task.status==='done' || !task.end) return null;
+  const t=tod();
+  if(task.end < t)  return 'overdue';
+  if(task.end === t) return 'due-today';
+  return null;
+}
+function ConfirmDialog({title, message, onConfirm, onCancel}) {
+  return (
+    <div className="modal-overlay" style={{zIndex:200}} onClick={e=>e.target===e.currentTarget&&onCancel()}>
+      <div className="modal" style={{width:360,padding:'28px 28px 24px'}}>
+        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
+          <span style={{fontSize:20,lineHeight:1}}>⚠️</span>
+          <div className="modal-title" style={{margin:0,fontSize:16}}>{title}</div>
+        </div>
+        <p style={{fontSize:13,color:'var(--text2)',lineHeight:1.6,marginBottom:24}}>{message}</p>
+        <div className="modal-actions" style={{marginTop:0}}>
+          <button className="btn-cancel" onClick={onCancel}>キャンセル</button>
+          <button className="btn-save" style={{background:'#ff5050'}} onClick={onConfirm}>削除する</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── BACKLOG MODAL ──
+function BacklogModal({backlog,onSave,onDelete,onClose}) {
+  const [form,setForm] = useState(backlog||{name:'',color:BL_COLORS[0]});
+  const [confirmDelete,setConfirmDelete] = useState(false);
+  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+  return (
+    <>
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal">
+        <div className="modal-title">{backlog?'バックログを編集':'新しいバックログ'}</div>
+        <div className="form-group">
+          <label className="form-label">バックログ名</label>
+          <input className="form-input" value={form.name} onChange={e=>set('name',e.target.value)}
+            placeholder="例：バックエンドAPI開発" autoFocus/>
+        </div>
+        <div className="form-group">
+          <label className="form-label">カラー</label>
+          <div className="color-swatches">
+            {BL_COLORS.map(c=>(
+              <div key={c} className={`color-swatch${form.color===c?' selected':''}`}
+                style={{background:c}} onClick={()=>set('color',c)}/>
+            ))}
+          </div>
+        </div>
+        <div className="modal-actions">
+          {backlog&&<button className="btn-delete" onClick={()=>setConfirmDelete(true)}>削除</button>}
+          <button className="btn-cancel" onClick={onClose}>キャンセル</button>
+          <button className="btn-save" onClick={()=>form.name&&onSave(form)}>保存</button>
+        </div>
+      </div>
+    </div>
+    {confirmDelete&&(
+      <ConfirmDialog
+        title="バックログを削除"
+        message={`「${form.name}」を削除します。配下のタスクもすべて削除されます。この操作は取り消せません。`}
+        onConfirm={()=>{ onDelete(backlog.id); onClose(); }}
+        onCancel={()=>setConfirmDelete(false)}
+      />
+    )}
+    </>
+  );
+}
+
+// ── TASK MODAL ──
+function TaskModal({task,backlogs,defaultBlId,prefill,onSave,onDelete,onClose}) {
+  const [form,setForm] = useState(task||{
+    title:'',description:'',
+    status: prefill?.status||'todo',
+    blId:defaultBlId||(backlogs[0]?.id||''),
+    start:tod(),end:ds(addD(new Date(),7))
+  });
+  const [confirmDelete,setConfirmDelete] = useState(false);
+  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+  return (
+    <>
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal">
+        <div className="modal-title">{task?'タスクを編集':'新しいタスク'}</div>
+        <div className="form-group">
+          <label className="form-label">バックログ</label>
+          <select className="form-select" value={form.blId} onChange={e=>set('blId',e.target.value)}>
+            {backlogs.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </div>
+        <div className="form-group">
+          <label className="form-label">タイトル</label>
+          <input className="form-input" value={form.title} onChange={e=>set('title',e.target.value)}
+            placeholder="タスク名を入力..." autoFocus/>
+        </div>
+        <div className="form-group">
+          <label className="form-label">説明</label>
+          <textarea className="form-textarea" value={form.description}
+            onChange={e=>set('description',e.target.value)} placeholder="詳細を入力..."/>
+        </div>
+        <div className="form-group">
+          <label className="form-label">ステータス</label>
+          <select className="form-select" value={form.status} onChange={e=>set('status',e.target.value)}>
+            {STATUSES.map(s=><option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
+          </select>
+        </div>
+        <div className="form-row">
+          <div className="form-group">
+            <label className="form-label">開始日</label>
+            <input type="date" className="form-input" value={form.start} onChange={e=>set('start',e.target.value)}/>
+          </div>
+          <div className="form-group">
+            <label className="form-label">終了日</label>
+            <input type="date" className="form-input" value={form.end} onChange={e=>set('end',e.target.value)}/>
+          </div>
+        </div>
+        <div className="modal-actions">
+          {task&&<button className="btn-delete" onClick={()=>setConfirmDelete(true)}>削除</button>}
+          <button className="btn-cancel" onClick={onClose}>キャンセル</button>
+          <button className="btn-save" onClick={()=>form.title&&onSave(form)}>保存</button>
+        </div>
+      </div>
+    </div>
+    {confirmDelete&&(
+      <ConfirmDialog
+        title="タスクを削除"
+        message={`「${form.title}」を削除します。この操作は取り消せません。`}
+        onConfirm={()=>{ onDelete(task.id); onClose(); }}
+        onCancel={()=>setConfirmDelete(false)}
+      />
+    )}
+    </>
+  );
+}
+
+// ── SIDEBAR ──
+function Sidebar({backlogs,tasks,onEditBl,onAddBl,onAddTask,onEditTask}) {
+  const [open, setSidebarOpen] = useState(false);
+  const [expanded,setExpanded] = useState(()=>Object.fromEntries(backlogs.map(b=>[b.id,false])));
+  useEffect(()=>{
+    setExpanded(e=>{
+      const n={...e};
+      backlogs.forEach(b=>{ if(!(b.id in n)) n[b.id]=false; });
+      return n;
+    });
+  },[backlogs]);
+
+  return (
+    <div className={`sidebar ${open?'open':'closed'}`}>
+      {/* Toggle button — always visible */}
+      <div className="sidebar-toggle" onClick={()=>setSidebarOpen(o=>!o)}>
+        {open ? '←' : '☰'}
+      </div>
+
+      {open ? (
+        /* ── FULL PANEL ── */
+        <div className="sidebar-inner">
+          <div className="sidebar-hdr">
+            <div className="sidebar-title">バックログ</div>
+            <button className="btn-add-bl" onClick={onAddBl}>＋ バックログ追加</button>
+          </div>
+          <div className="sidebar-list">
+            {backlogs.map(bl=>{
+              const blTasks=tasks.filter(t=>t.blId===bl.id);
+              const isOpen=expanded[bl.id];
+              return (
+                <div key={bl.id} className="bl-item">
+                  <div className="bl-item-hdr" onClick={()=>setExpanded(e=>({...e,[bl.id]:!e[bl.id]}))}>
+                    <div className="bl-color" style={{background:bl.color}}/>
+                    <span className="bl-name">{bl.name}</span>
+                    <span className="bl-cnt">{blTasks.length}</span>
+                    <div onClick={e=>e.stopPropagation()}>
+                      <button className="bl-mini-btn" onClick={()=>onEditBl(bl)}>✎</button>
+                    </div>
+                    <span className={`bl-chevron${isOpen?' open':''}`}>▶</span>
+                  </div>
+                  {isOpen&&(
+                    <div className="bl-tasks">
+                      {blTasks.map(t=>(
+                        <div key={t.id} className="bl-task-row" onClick={()=>onEditTask(t)}>
+                          <div className="t-status-dot" style={{background:STATUS_COLORS[t.status]}}/>
+                          <span className="bl-task-name">{t.title}</span>
+                          <span className="bl-task-date">{fmt(t.end)}</span>
+                        </div>
+                      ))}
+                      <div className="bl-add-task" onClick={()=>onAddTask(bl.id)}>＋ タスク追加</div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        /* ── ICON BAR ── */
+        <div className="sidebar-icons">
+          {/* Add backlog */}
+          <button className="sidebar-icon-btn" onClick={()=>{ setSidebarOpen(true); onAddBl(); }}>
+            <span style={{fontSize:16,color:'var(--text3)'}}>＋</span>
+            <span className="sidebar-icon-tooltip">バックログ追加</span>
+          </button>
+          {/* One dot per backlog */}
+          {backlogs.map(bl=>(
+            <button key={bl.id} className="sidebar-icon-btn" onClick={()=>setSidebarOpen(true)}>
+              <div className="sidebar-icon-dot" style={{background:bl.color}}/>
+              <span className="sidebar-icon-tooltip">{bl.name}（{tasks.filter(t=>t.blId===bl.id).length}）</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── KANBAN ──
+function KanbanView({backlogs,tasks,onUpdate,onDelete,onEdit,onAddTask}) {
+  const [dragging,setDragging]=useState(null);
+  const [overCol,setOverCol]=useState(null);
+  const cols=useMemo(()=>STATUSES.reduce((a,s)=>({...a,[s]:tasks.filter(t=>t.status===s)}),{}),[tasks]);
+  const getBl=id=>backlogs.find(b=>b.id===id);
+  return (
+    <div className="kanban">
+      {STATUSES.map(status=>(
+        <div key={status} className={`kanban-col${overCol===status?' drag-over':''}`}
+          onDragOver={e=>{e.preventDefault();setOverCol(status);}}
+          onDragLeave={()=>setOverCol(null)}
+          onDrop={e=>{
+            e.preventDefault();
+            if(dragging&&dragging.status!==status) onUpdate({...dragging,status});
+            setDragging(null);setOverCol(null);
+          }}>
+          <div className="col-header">
+            <div className="col-label">
+              <div className="col-dot" style={{background:STATUS_COLORS[status]}}/>
+              {STATUS_LABELS[status]}
+            </div>
+            <span className="col-count">{cols[status].length}</span>
+          </div>
+          <div className="col-tasks">
+            {cols[status].length===0&&(
+              <div className="empty-col"><span style={{fontSize:20}}>○</span><span>タスクなし</span></div>
+            )}
+            {cols[status].map(task=>{
+              const bl=getBl(task.blId);
+              const dl=deadlineStatus(task);
+              return (
+                <div key={task.id}
+                  className={`task-card${dragging?.id===task.id?' dragging':''}${dl?' '+dl:''}`}
+                  draggable onDragStart={()=>setDragging(task)}
+                  onDragEnd={()=>{setDragging(null);setOverCol(null);}}
+                  onClick={()=>onEdit(task)}>
+                  {bl&&<span className="task-card-bl" style={{background:bl.color+'22',color:bl.color}}>{bl.name}</span>}
+                  <div className="task-card-title">{task.title}</div>
+                  {task.description&&<div className="task-card-desc">{task.description}</div>}
+                  <div className="task-card-footer">
+                    <span className="task-card-dates">{fmt(task.start)} → {fmt(task.end)}</span>
+                    {dl==='overdue'   && <span className="deadline-badge overdue">⚠ 期限超過</span>}
+                    {dl==='due-today' && <span className="deadline-badge due-today">● 今日期限</span>}
+                  </div>
+                  <div className="status-bar" style={{background:STATUS_COLORS[task.status]}}/>
+                </div>
+              );
+            })}
+            <button className="col-add-btn" onClick={()=>onAddTask(status)}>＋ タスク追加</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── GANTT POPOVER ──
+function GanttPopover({task,backlogs,anchorRect,onSave,onDelete,onClose}) {
+  const [form,setForm]=useState({...task});
+  const [confirmDelete,setConfirmDelete]=useState(false);
+  const ref=useRef(null);
+  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+  useEffect(()=>{
+    function onDown(e){ if(ref.current&&!ref.current.contains(e.target)&&!confirmDelete) onClose(); }
+    setTimeout(()=>document.addEventListener('mousedown',onDown),0);
+    return ()=>document.removeEventListener('mousedown',onDown);
+  },[onClose,confirmDelete]);
+  const style=useMemo(()=>{
+    const W=320,H=420;
+    let left=anchorRect?anchorRect.left:window.innerWidth/2-W/2;
+    let top=anchorRect?anchorRect.bottom+8:80;
+    if(left+W>window.innerWidth-16) left=window.innerWidth-W-16;
+    if(left<8) left=8;
+    if(top+H>window.innerHeight-16) top=anchorRect?anchorRect.top-H-8:window.innerHeight-H-16;
+    return {top,left,width:W};
+  },[anchorRect]);
+  return (
+    <>
+    <div ref={ref} className="gantt-popover" style={style}>
+      <div className="gantt-pop-hdr">
+        <div className="gantt-pop-status-dot" style={{background:STATUS_COLORS[form.status]}}/>
+        <input className="gantt-pop-title" value={form.title}
+          onChange={e=>set('title',e.target.value)} placeholder="タスク名..." autoFocus/>
+        <button className="gantt-pop-close" onClick={onClose}>✕</button>
+      </div>
+      <div className="gantt-pop-row">
+        <div className="gantt-pop-label">バックログ</div>
+        <select className="gantt-pop-select" value={form.blId} onChange={e=>set('blId',e.target.value)}>
+          {backlogs.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+      </div>
+      <textarea className="gantt-pop-desc" value={form.description||''}
+        onChange={e=>set('description',e.target.value)} placeholder="説明（任意）..." rows={2}/>
+      <div className="gantt-pop-row">
+        <div className="gantt-pop-label">ステータス</div>
+        <div className="gantt-status-group">
+          {STATUSES.map(s=>(
+            <button key={s} className="gantt-status-chip"
+              style={form.status===s?{background:STATUS_COLORS[s],color:'#000',borderColor:STATUS_COLORS[s]}:{borderColor:STATUS_COLORS[s],color:STATUS_COLORS[s]}}
+              onClick={()=>set('status',s)}>{STATUS_LABELS[s]}</button>
+          ))}
+        </div>
+      </div>
+      <div className="gantt-pop-row">
+        <div className="gantt-pop-label">期間</div>
+        <div className="gantt-pop-dates">
+          <input type="date" className="gantt-pop-date" value={form.start||''} onChange={e=>set('start',e.target.value)}/>
+          <span className="gantt-pop-arrow">→</span>
+          <input type="date" className="gantt-pop-date" value={form.end||''} onChange={e=>set('end',e.target.value)}/>
+        </div>
+      </div>
+      {form.start&&form.end&&(
+        <div className="gantt-pop-dur">{Math.max(1,diff(form.start,form.end)+1)} 日間</div>
+      )}
+      <div className="gantt-pop-actions">
+        <button className="gantt-pop-delete" onClick={()=>setConfirmDelete(true)}>削除</button>
+        <button className="gantt-pop-save" onClick={()=>{if(form.title){onSave(form);onClose();}}}>保存</button>
+      </div>
+    </div>
+    {confirmDelete&&(
+      <ConfirmDialog
+        title="タスクを削除"
+        message={`「${form.title}」を削除します。この操作は取り消せません。`}
+        onConfirm={()=>{ onDelete(task.id); onClose(); }}
+        onCancel={()=>setConfirmDelete(false)}
+      />
+    )}
+    </>
+  );
+}
+
+// ── GANTT ──
+function GanttView({backlogs,tasks,onUpdate,onDelete,onCreateTask}) {
+  const todayStr=tod();
+  const [offset,setOffset]=useState(-7);
+  const DAYS=60;
+  const [collapsed,setCollapsed]=useState(()=>Object.fromEntries(backlogs.map(b=>[b.id,false])));
+  // 新しいバックログが追加されたら展開状態で追加
+  useEffect(()=>{
+    setCollapsed(c=>{
+      const n={...c};
+      backlogs.forEach(b=>{ if(!(b.id in n)) n[b.id]=false; });
+      return n;
+    });
+  },[backlogs]);
+  const [dragState,setDragState]=useState(null);
+  const [preview,setPreview]=useState(null);
+  const [tooltip,setTooltip]=useState(null);
+  const [popover,setPopover]=useState(null);
+  const [createPrev,setCreatePrev]=useState(null); // {rowKey,left,width}
+  const previewRef=useRef(null);
+  const draggedRef=useRef(false);
+  useEffect(()=>{previewRef.current=preview;},[preview]);
+  const isDragging=!!dragState;
+
+  const days=useMemo(()=>Array.from({length:DAYS},(_,i)=>{
+    const d=addD(new Date(),offset+i);
+    const dow=d.getDay();
+    return {date:d,str:ds(d),isToday:ds(d)===todayStr,isSat:dow===6,isSun:dow===0};
+  }),[offset,todayStr]);
+
+  const first=days[0].str;
+  const totalW=DAYS*DAY_W;
+  const xFor=s=>diff(first,s)*DAY_W;
+  const wFor=(s,e)=>Math.max((diff(s,e)+1)*DAY_W,DAY_W);
+  const todayX=xFor(todayStr);
+
+  // Flat rows: group header → task rows → add-row, per backlog
+  const rows=useMemo(()=>{
+    const result=[];
+    backlogs.forEach(bl=>{
+      const blTasks=tasks.filter(t=>t.blId===bl.id&&t.start&&t.end&&
+        t.end>=days[0].str&&t.start<=days[days.length-1].str);
+      result.push({type:'group',bl,count:blTasks.length});
+      if(!collapsed[bl.id]){
+        blTasks.forEach(t=>result.push({type:'task',task:t,bl}));
+        result.push({type:'add',bl});
+      }
+    });
+    return result;
+  },[backlogs,tasks,days,collapsed]);
+
+  const renderedRows=useMemo(()=>
+    rows.map(r=>r.type==='task'&&preview&&r.task.id===preview.id?{...r,task:preview}:r),
+    [rows,preview]);
+
+  function startDrag(e,task,type){
+    e.stopPropagation();e.preventDefault();
+    const sx=e.clientX,os=task.start,oe=task.end;
+    let moved=false;
+    draggedRef.current=false;
+    setDragState({type,task});
+    function onMove(ev){
+      if(!moved&&Math.abs(ev.clientX-sx)>4){
+        moved=true;
+        draggedRef.current=true;
+      }
+      if(!moved) return;
+      const dd=Math.round((ev.clientX-sx)/DAY_W);
+      let u;
+      if(type==='move') u={...task,start:ds(addD(new Date(os),dd)),end:ds(addD(new Date(oe),dd))};
+      else if(type==='resize-right'){ const ne=ds(addD(new Date(oe),dd)); if(ne<os)return; u={...task,end:ne}; }
+      else if(type==='resize-left'){ const ns=ds(addD(new Date(os),dd)); if(ns>oe)return; u={...task,start:ns}; }
+      if(u) setPreview(u);
+    }
+    function onUp(){
+      if(draggedRef.current&&previewRef.current) onUpdate(previewRef.current);
+      setDragState(null);setPreview(null);setTooltip(null);
+      window.removeEventListener('mousemove',onMove);
+      window.removeEventListener('mouseup',onUp);
+    }
+    window.addEventListener('mousemove',onMove);
+    window.addEventListener('mouseup',onUp);
+  }
+
+  function handleCreateStart(e,rowKey,blId){
+    if(isDragging)return;
+    e.preventDefault();
+    const se=document.getElementById('gantt-scroll');
+    if(!se)return;
+    const seRect=se.getBoundingClientRect();
+    const sl=se.scrollLeft;
+    // x0: pixel position within the full gantt grid (scrollLeft考慮)
+    const x0=e.clientX-seRect.left+sl;
+    function onMove(ev){
+      const cx=ev.clientX-seRect.left+se.scrollLeft;
+      setCreatePrev({rowKey,left:Math.min(x0,cx),width:Math.abs(cx-x0)});
+    }
+    function onUp(ev){
+      const cx=ev.clientX-seRect.left+se.scrollLeft;
+      const l=Math.min(x0,cx),r=Math.max(x0,cx);
+      if(r-l>DAY_W/2){
+        const s=ds(addD(new Date(first),Math.floor(l/DAY_W)));
+        const en=ds(addD(new Date(first),Math.floor(r/DAY_W)));
+        onCreateTask({blId,start:s,end:en});
+      }
+      setCreatePrev(null);
+      window.removeEventListener('mousemove',onMove);
+      window.removeEventListener('mouseup',onUp);
+    }
+    window.addEventListener('mousemove',onMove);
+    window.addEventListener('mouseup',onUp);
+  }
+
+  return (
+    <div className="gantt-container">
+      <div className="gantt-toolbar">
+        <span className="gantt-toolbar-title">ガントチャート</span>
+        <div className="gantt-nav">
+          <button className="nav-btn" onClick={()=>setOffset(o=>o-14)}>‹</button>
+          <button className="nav-btn" onClick={()=>{
+            setOffset(-7);
+            const se=document.getElementById('gantt-scroll');
+            if(se) se.scrollLeft=0;
+          }}>今日</button>
+          <button className="nav-btn" onClick={()=>setOffset(o=>o+14)}>›</button>
+        </div>
+        <span className="gantt-period">{fmt(days[0].str)} – {fmt(days[DAYS-1].str)}</span>
+        <div className="gantt-hints">
+          <span className="gantt-hint-chip">↔ ドラッグで移動</span>
+          <span className="gantt-hint-chip">◀▶ 端で期間変更</span>
+          <span className="gantt-hint-chip">空白ドラッグで作成</span>
+        </div>
+      </div>
+      <div className="gantt-body">
+        {/* Left labels */}
+        <div className="gantt-left">
+          <div className="gantt-left-header">タスク</div>
+          <div className="gantt-left-rows" id="gantt-left-rows">
+            {renderedRows.map(row=>{
+              if(row.type==='group') return (
+                <div key={row.bl.id+'-g'} className="gantt-group-row"
+                  onClick={()=>setCollapsed(c=>({...c,[row.bl.id]:!c[row.bl.id]}))}>
+                  <div className="gantt-group-color" style={{background:row.bl.color}}/>
+                  <span className="gantt-group-name">{row.bl.name}</span>
+                  <span className="gantt-group-count">{row.count}</span>
+                  <span className={`gantt-group-chevron${!collapsed[row.bl.id]?' open':''}`}>▶</span>
+                </div>
+              );
+              if(row.type==='add') return (
+                <div key={row.bl.id+'-add'} className="gantt-row-add"
+                  onClick={()=>onCreateTask({blId:row.bl.id})}>
+                  ＋ タスク追加
+                </div>
+              );
+              const {task,bl}=row;
+              return (
+                <div key={task.id} className="gantt-row-label"
+                  onClick={()=>setPopover({task,rect:null})}>
+                  <div className="gantt-row-dot" style={{background:STATUS_COLORS[task.status]}}/>
+                  <div style={{flex:1,overflow:'hidden'}}>
+                    <div className="gantt-row-name">{task.title}</div>
+                    <div className="gantt-row-dates">{fmt(task.start)} – {fmt(task.end)}</div>
+                  </div>
+                  <button className="gantt-row-edit-btn"
+                    onClick={e=>{e.stopPropagation();setPopover({task,rect:e.currentTarget.getBoundingClientRect()});}}>✎</button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        {/* Right grid */}
+        <div className="gantt-right">
+          <div className="gantt-scroll" id="gantt-scroll" onScroll={e=>{
+            const lr=document.getElementById('gantt-left-rows');
+            if(lr) lr.scrollTop=e.target.scrollTop;
+          }}>
+            <div className="gantt-grid" style={{width:totalW,minWidth:totalW}}>
+              <div className="gantt-header-row">
+                {days.map(d=>(
+                  <div key={d.str} className={`gantt-day-header${d.isToday?' today':''}${d.isSat?' saturday':''}${d.isSun?' sunday':''}`}
+                    style={{width:DAY_W}}>
+                    <span className="day-num">{d.date.getDate()}</span>
+                    <span className="day-name">{'日月火水木金土'[d.date.getDay()]}</span>
+                  </div>
+                ))}
+              </div>
+              {todayX>=0&&todayX<=totalW&&(
+                <div className="gantt-today-line" style={{left:todayX+DAY_W/2}}/>
+              )}
+              <div className="gantt-rows">
+                {renderedRows.map((row,ri)=>{
+                  const rowKey=row.type==='group'?row.bl.id+'-g':
+                    row.type==='add'?row.bl.id+'-add':row.task.id;
+
+                  if(row.type==='group') return (
+                    <div key={rowKey} className="gantt-grid-group" style={{width:totalW}}>
+                      {days.map(d=>(
+                        <div key={d.str} className="gantt-grid-group-cell"
+                          style={{width:DAY_W,
+                            background: d.isSat ? 'rgba(74,158,255,0.06)'
+                                      : d.isSun ? 'rgba(255,80,80,0.06)'
+                                      : row.bl.color+'0a'}}/>
+                      ))}
+                    </div>
+                  );
+
+                  if(row.type==='add') return (
+                    <div key={rowKey} className="gantt-data-row" style={{width:totalW}}>
+                      {days.map(d=>(
+                        <div key={d.str} className={`gantt-cell${d.isSat?' saturday':''}${d.isSun?' sunday':''}${d.isToday?' today-col':''}`}
+                          style={{width:DAY_W}}/>
+                      ))}
+                      <div className="gantt-create-zone"
+                        onMouseDown={e=>handleCreateStart(e,rowKey,row.bl.id)}/>
+                      {createPrev&&createPrev.rowKey===rowKey&&(
+                        <div className="gantt-create-preview"
+                          style={{left:createPrev.left,width:createPrev.width}}/>
+                      )}
+                    </div>
+                  );
+
+                  const {task,bl}=row;
+                  const isActive=dragState?.task?.id===task.id;
+                  const dl=deadlineStatus(task);
+                  const x=xFor(task.start),w=wFor(task.start,task.end);
+                  const cx=Math.max(0,x),cw=Math.min(w+Math.min(0,x),totalW-cx);
+                  return (
+                    <div key={task.id} className="gantt-data-row" style={{width:totalW}}>
+                      {days.map(d=>(
+                        <div key={d.str} className={`gantt-cell${d.isSat?' saturday':''}${d.isSun?' sunday':''}${d.isToday?' today-col':''}`}
+                          style={{width:DAY_W}}/>
+                      ))}
+                      <div className="gantt-create-zone" onMouseDown={e=>handleCreateStart(e,task.id,bl.id)}/>
+                      {createPrev&&createPrev.rowKey===task.id&&(
+                        <div className="gantt-create-preview"
+                          style={{left:createPrev.left,width:createPrev.width}}/>
+                      )}
+                      <div className="gantt-bar-layer">
+                        {cw>0&&(
+                          <div className={`gantt-bar${isActive?' is-dragging':''}${dl?' '+dl:''}`}
+                            style={{left:cx,width:cw,background:bl.color}}
+                            onMouseDown={e=>e.stopPropagation()}
+                            onMouseEnter={e=>setTooltip({task,bl,x:e.clientX,y:e.clientY})}
+                            onMouseLeave={()=>!isDragging&&setTooltip(null)}
+                            onMouseMove={e=>setTooltip(t=>t?{...t,x:e.clientX,y:e.clientY}:null)}>
+                            <div className="gantt-bar-resize gantt-bar-resize-left"
+                              onMouseDown={e=>{e.stopPropagation();startDrag(e,task,'resize-left');}}>⋮</div>
+                            <div className="gantt-bar-inner"
+                              onMouseDown={e=>{e.stopPropagation();startDrag(e,task,'move');}}>
+                              {task.title}
+                              {isActive&&preview&&(
+                                <span className="gantt-drag-dates">{fmt(preview.start)}–{fmt(preview.end)}</span>
+                              )}
+                            </div>
+                            <div className="gantt-bar-resize gantt-bar-resize-right"
+                              onMouseDown={e=>{e.stopPropagation();startDrag(e,task,'resize-right');}}>⋮</div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      {tooltip&&(
+        <div className="gantt-tooltip" style={{left:tooltip.x+14,top:tooltip.y-10}}>
+          <div className="gantt-tooltip-title">{tooltip.task.title}</div>
+          <span className="gantt-tooltip-bl" style={{background:tooltip.bl.color+'22',color:tooltip.bl.color}}>
+            {tooltip.bl.name}
+          </span>
+          {tooltip.task.description&&<div className="gantt-tooltip-desc">{tooltip.task.description}</div>}
+          <div className="gantt-tooltip-dates">
+            <span style={{color:STATUS_COLORS[tooltip.task.status]}}>{STATUS_LABELS[tooltip.task.status]}</span>
+            &nbsp;·&nbsp;
+            {fmt(preview&&dragState?.task?.id===tooltip.task.id ? preview.start : tooltip.task.start)}
+            &nbsp;→&nbsp;
+            {fmt(preview&&dragState?.task?.id===tooltip.task.id ? preview.end   : tooltip.task.end)}
+            &nbsp;·&nbsp;
+            {Math.max(1,diff(
+              preview&&dragState?.task?.id===tooltip.task.id ? preview.start : tooltip.task.start,
+              preview&&dragState?.task?.id===tooltip.task.id ? preview.end   : tooltip.task.end
+            )+1)}日間
+          </div>
+        </div>
+      )}
+      {popover&&(
+        <GanttPopover task={popover.task} backlogs={backlogs} anchorRect={popover.rect}
+          onSave={t=>{onUpdate(t);setPopover(null);}}
+          onDelete={id=>{onDelete(id);setPopover(null);}}
+          onClose={()=>setPopover(null)}/>
+      )}
+    </div>
+  );
+}
+
+// ── CALENDAR ──
+function CalendarView({backlogs,tasks,onEditTask}) {
+  const [calDate,setCalDate]=useState(new Date());
+  const year=calDate.getFullYear(),month=calDate.getMonth();
+  const todayStr=tod();
+  const calDays=useMemo(()=>{
+    const first=new Date(year,month,1),last=new Date(year,month+1,0);
+    const cells=[];
+    for(let i=first.getDay()-1;i>=0;i--) cells.push({date:addD(first,-i-1),other:true});
+    for(let d=1;d<=last.getDate();d++) cells.push({date:new Date(year,month,d),other:false});
+    const rem=42-cells.length;
+    for(let i=1;i<=rem;i++) cells.push({date:addD(last,i),other:true});
+    return cells;
+  },[year,month]);
+  const getBl=id=>backlogs.find(b=>b.id===id);
+  const mns=['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+  return (
+    <div className="calendar-container">
+      <div className="calendar-header">
+        <button className="nav-btn" onClick={()=>setCalDate(new Date(year,month-1,1))}>‹</button>
+        <span className="calendar-title">{year}年 {mns[month]}</span>
+        <button className="nav-btn" onClick={()=>setCalDate(new Date(year,month+1,1))}>›</button>
+        <button className="nav-btn" onClick={()=>setCalDate(new Date())} style={{marginLeft:4,fontSize:11,width:'auto',padding:'0 10px'}}>今月</button>
+        <div className="cal-legend">
+          {STATUSES.map(s=>(
+            <div key={s} className="cal-legend-item">
+              <div className="cal-legend-dot" style={{background:STATUS_COLORS[s]}}/>
+              {STATUS_LABELS[s]}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="calendar-grid">
+        <div className="calendar-weekdays">
+          {['日','月','火','水','木','金','土'].map((d,i)=>(
+            <div key={d} className={`cal-weekday${i===0?' sunday':i===6?' saturday':''}`}>{d}</div>
+          ))}
+        </div>
+        <div className="calendar-days">
+          {calDays.map((cell,i)=>{
+            const dstr=ds(cell.date);
+            const dow=cell.date.getDay();
+            const dayTasks=tasks.filter(t=>t.start&&t.end&&dstr>=t.start&&dstr<=t.end);
+            return (
+              <div key={i} className={`cal-day${cell.other?' other-month':''}${dstr===todayStr?' today':''}${dow===6?' saturday':''}${dow===0?' sunday':''}`}>
+                <div className="cal-day-num">{cell.date.getDate()}</div>
+                {dayTasks.slice(0,3).map(t=>{
+                  const bl=getBl(t.blId);
+                  const dl=deadlineStatus(t);
+                  const isEndDay=dstr===t.end;
+                  return (
+                    <div key={t.id} className="cal-task-pill"
+                      style={{
+                        background: dl==='overdue' ? 'rgba(255,60,60,0.15)'
+                                  : dl==='due-today' ? 'rgba(255,180,0,0.15)'
+                                  : (bl?.color||'#888')+'22',
+                        color: dl==='overdue' ? '#ff4444'
+                             : dl==='due-today' ? '#ffb400'
+                             : bl?.color||'#888',
+                        border: `1px solid ${dl==='overdue'?'rgba(255,60,60,0.4)':dl==='due-today'?'rgba(255,180,0,0.4)':(bl?.color||'#888')+'40'}`,
+                      }}
+                      onClick={()=>onEditTask(t)}>
+                      {dl==='overdue'&&isEndDay?'⚠ ':dl==='due-today'&&isEndDay?'● ':''}{t.title}
+                    </div>
+                  );
+                })}
+                {dayTasks.length>3&&<div className="cal-more">+{dayTasks.length-3}</div>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── HELP MODAL ──
+const HELP_CONTENT = {
+  kanban: {
+    title: 'カンバンの使い方',
+    sections: [
+      {
+        heading: 'バックログを追加する',
+        rows: [
+          { icon: '☰', text: <><strong>左上の ☰</strong> をクリックしてサイドバーを開く</> },
+          { icon: '＋', text: <><strong>「＋ バックログ追加」</strong> をクリックして名前とカラーを設定</> },
+        ]
+      },
+      {
+        heading: 'タスクを追加する',
+        rows: [
+          { icon: '📋', text: <>各カラム下部の <strong>「＋ タスク追加」</strong> をクリック</> },
+          { icon: '📁', text: <>サイドバーのバックログ内 <strong>「＋ タスク追加」</strong> からも追加可能</> },
+          { icon: '✎', text: <><strong>バックログ・ステータス・開始日・終了日</strong> を設定して「保存」</> },
+        ]
+      },
+      {
+        heading: 'タスクを操作する',
+        rows: [
+          { icon: '🖱', text: <><strong>カードをドラッグ</strong> して別カラムにドロップするとステータスが変わる</> },
+          { icon: '⚠', text: <>期限超過は<strong style={{color:'#ff4444'}}>赤</strong>、今日期限は<strong style={{color:'#ffb400'}}>黄色</strong>のバッジで表示</> },
+          { icon: '✏', text: <><strong>カードをクリック</strong> して編集・削除</> },
+        ]
+      },
+    ]
+  },
+  gantt: {
+    title: 'ガントチャートの使い方',
+    sections: [
+      {
+        heading: 'バックログ・タスクを追加する',
+        rows: [
+          { icon: '☰', text: <><strong>左上の ☰</strong> でサイドバーを開き <strong>「＋ バックログ追加」</strong></> },
+          { icon: '＋', text: <>左パネルの <strong>「＋ タスク追加」</strong> でそのバックログにタスクを追加</> },
+          { icon: '✏', text: <>グリッドの<strong>空白部分をドラッグ</strong> すると期間を引いてタスク作成</> },
+        ]
+      },
+      {
+        heading: 'バーを操作する',
+        rows: [
+          { icon: '↔', text: <><strong>バーの中央をドラッグ</strong> すると日程ごと移動</> },
+          { icon: '◀', text: <><strong>バー左端をドラッグ</strong> すると開始日を変更</> },
+          { icon: '▶', text: <><strong>バー右端をドラッグ</strong> すると終了日を変更</> },
+          { icon: '✎', text: <>左パネルの <strong>✎ ボタン</strong> でタスクを編集</> },
+        ]
+      },
+      {
+        heading: 'ナビゲーション',
+        rows: [
+          { icon: '📅', text: <><strong>「今日」</strong> ボタンで現在の日付に戻る</> },
+          { icon: '‹›', text: <><strong>‹ › ボタン</strong> で14日単位で前後に移動</> },
+        ]
+      },
+    ]
+  },
+  calendar: {
+    title: 'カレンダーの使い方',
+    sections: [
+      {
+        heading: 'タスクを確認する',
+        rows: [
+          { icon: '📅', text: <>タスクは<strong>開始日〜終了日の期間中</strong>すべての日付に表示</> },
+          { icon: '🎨', text: <><strong>バックログのカラー</strong> でタスクを色分け表示</> },
+          { icon: '⚠', text: <>期限超過は<strong style={{color:'#ff4444'}}>赤</strong>、今日期限は<strong style={{color:'#ffb400'}}>黄色</strong>で強調表示</> },
+        ]
+      },
+      {
+        heading: 'タスクを操作する',
+        rows: [
+          { icon: '✏', text: <><strong>ピルをクリック</strong> してタスクを編集</> },
+          { icon: '‹›', text: <><strong>‹ › ボタン</strong> で月を移動、<strong>「今月」</strong> で当月に戻る</> },
+          { icon: '＋', text: <>タスク追加は<strong>カンバンビュー</strong>またはサイドバーから</> },
+        ]
+      },
+    ]
+  },
+};
+
+function HelpModal({ view, onClose }) {
+  const content = HELP_CONTENT[view];
+  if (!content) return null;
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="help-modal">
+        <div className="help-title">❓ {content.title}</div>
+        <div className="help-subtitle">TaskFlow の基本的な使い方を説明します</div>
+        {content.sections.map((sec, si) => (
+          <div key={si} className="help-section">
+            {si > 0 && <hr className="help-divider"/>}
+            <div className="help-section-title">
+              <span>▍</span>{sec.heading}
+            </div>
+            {sec.rows.map((row, ri) => (
+              <div key={ri} className="help-row">
+                <div className="help-icon">{row.icon}</div>
+                <div className="help-text">{row.text}</div>
+              </div>
+            ))}
+          </div>
+        ))}
+        <button className="help-close" onClick={onClose}>閉じる</button>
+      </div>
+    </div>
+  );
+}
+
+// ── APP ──
+function App() {
+  const [backlogs,setBacklogs]=useState(INIT_BL);
+  const [tasks,setTasks]=useState(INIT_TASKS);
+  const [view,setView]=useState('kanban');
+  const [taskModal,setTaskModal]=useState(null);
+  const [blModal,setBlModal]=useState(null);
+  const [showHelp,setShowHelp]=useState(false);
+
+  function saveBl(form){
+    setBacklogs(bs=>{
+      const ex=bs.find(b=>b.id===form.id);
+      return ex?bs.map(b=>b.id===form.id?{...form}:b):[...bs,{...form,id:uid()}];
+    });
+    setBlModal(null);
+  }
+  function deleteBl(id){
+    setBacklogs(bs=>bs.filter(b=>b.id!==id));
+    setTasks(ts=>ts.filter(t=>t.blId!==id));
+    setBlModal(null);
+  }
+  function saveTask(form){
+    setTasks(ts=>{
+      const ex=ts.find(t=>t.id===form.id);
+      return ex?ts.map(t=>t.id===form.id?{...form}:t):[...ts,{...form,id:uid()}];
+    });
+    setTaskModal(null);
+  }
+  function deleteTask(id){ setTasks(ts=>ts.filter(t=>t.id!==id)); setTaskModal(null); }
+  function updateTask(t){ setTasks(ts=>ts.map(x=>x.id===t.id?t:x)); }
+
+  return (
+    <>
+      <div className="header">
+        <div className="logo"><div className="logo-dot"/>TaskFlow</div>
+        <div className="tab-group">
+          <button className={`tab${view==='kanban'?' active':''}`} onClick={()=>setView('kanban')}>カンバン</button>
+          <button className={`tab${view==='gantt'?' active':''}`} onClick={()=>setView('gantt')}>ガント</button>
+          <button className={`tab${view==='calendar'?' active':''}`} onClick={()=>setView('calendar')}>カレンダー</button>
+        </div>
+        <div className="spacer"/>
+        <span className="hdr-count">{tasks.length} tasks</span>
+        <button className="help-btn" onClick={()=>setShowHelp(true)}>?</button>
+      </div>
+      <div className="main">
+        <div className="layout">
+          <Sidebar backlogs={backlogs} tasks={tasks}
+            onEditBl={bl=>setBlModal({backlog:bl})}
+            onAddBl={()=>setBlModal({})}
+            onAddTask={blId=>setTaskModal({task:null,defaultBlId:blId})}
+            onEditTask={t=>setTaskModal({task:t,defaultBlId:t.blId})}/>
+          <div className="content">
+            {view==='kanban'&&(
+              <KanbanView backlogs={backlogs} tasks={tasks} onUpdate={updateTask}
+                onDelete={deleteTask} onEdit={t=>setTaskModal({task:t,defaultBlId:t.blId})}
+                onAddTask={status=>setTaskModal({task:null,defaultBlId:backlogs[0]?.id,prefill:{status}})}/>
+            )}
+            {view==='gantt'&&(
+              <GanttView backlogs={backlogs} tasks={tasks} onUpdate={updateTask}
+                onDelete={deleteTask}
+                onCreateTask={d=>setTaskModal({task:null,defaultBlId:d.blId||backlogs[0]?.id,prefill:d})}/>
+            )}
+            {view==='calendar'&&(
+              <CalendarView backlogs={backlogs} tasks={tasks}
+                onEditTask={t=>setTaskModal({task:t,defaultBlId:t.blId})}/>
+            )}
+          </div>
+        </div>
+      </div>
+      {showHelp&&<HelpModal view={view} onClose={()=>setShowHelp(false)}/>}
+      {taskModal!==null&&(
+        <TaskModal task={taskModal.task} backlogs={backlogs}
+          defaultBlId={taskModal.defaultBlId}
+          prefill={taskModal.prefill}
+          onSave={saveTask} onDelete={deleteTask} onClose={()=>setTaskModal(null)}/>
+      )}
+      {blModal!==null&&(
+        <BacklogModal backlog={blModal.backlog||null}
+          onSave={saveBl} onDelete={deleteBl} onClose={()=>setBlModal(null)}/>
+      )}
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
