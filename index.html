@@ -1,0 +1,1012 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>TaskFlow — Project Manager</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="styles.css"/>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- ============================================================
+     utils.js
+     ============================================================ -->
+<script type="text/babel">
+function fmt(d) { if(!d) return ''; return new Date(d).toLocaleDateString('ja-JP',{month:'short',day:'numeric'}); }
+function ds(d) { return d.toISOString().slice(0,10); }
+function addD(d,n) { const x=new Date(d); x.setDate(x.getDate()+n); return x; }
+function diff(a,b) { return Math.round((new Date(b)-new Date(a))/86400000); }
+function tod() { return ds(new Date()); }
+function uid() { return Date.now().toString(36)+Math.random().toString(36).slice(2); }
+// タスクの全期間を正規化: periods[]があればそれ、なければstart/endから生成
+function taskPeriods(task) {
+  if(task.periods&&task.periods.length>0) return task.periods;
+  if(task.start&&task.end) return [{start:task.start,end:task.end}];
+  return [];
+}
+function taskFirstStart(task) {
+  const ps=taskPeriods(task); if(!ps.length) return null;
+  return ps.map(p=>p.start).sort()[0];
+}
+function taskLastEnd(task) {
+  const ps=taskPeriods(task); if(!ps.length) return null;
+  return ps.map(p=>p.end).sort().slice(-1)[0];
+}
+function deadlineStatus(task) {
+  if(task.status==='done') return null;
+  const end=taskLastEnd(task); if(!end) return null;
+  const t=tod();
+  if(end < t)  return 'overdue';
+  if(end === t) return 'due-today';
+  return null;
+}
+</script>
+
+<!-- ============================================================
+     components/constants.js
+     ============================================================ -->
+<script type="text/babel">
+const DAY_W = 40;
+const STATUSES = ['todo','inprogress','done'];
+const STATUS_LABELS = { todo:'To Do', inprogress:'In Progress', done:'Done' };
+const STATUS_COLORS = { todo:'var(--todo)', inprogress:'var(--prog)', done:'var(--done)' };
+const BL_COLORS = ['#7c6af7','#e8ff47','#ff8c42','#4a9eff','#4ade80','#f472b6','#fb923c','#a78bfa'];
+
+const INIT_BL = [
+  {id:'bl1',name:'サンプルバックログ',color:'#7c6af7'},
+];
+function _initTasks() {
+  return [
+    {id:'t1',blId:'bl1',title:'サンプルタスク',description:'これはサンプルのタスクです',status:'todo',
+     start:ds(new Date()),end:ds(addD(new Date(),7))},
+  ];
+}
+</script>
+
+<!-- ============================================================
+     components/Modals.jsx
+     ============================================================ -->
+<script type="text/babel">
+function ConfirmDialog({title,message,onConfirm,onCancel}) {
+  return (
+    <div className="modal-overlay" style={{zIndex:200}} onClick={e=>e.target===e.currentTarget&&onCancel()}>
+      <div className="modal" style={{width:360,padding:'28px 28px 24px'}}>
+        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
+          <span style={{fontSize:20,lineHeight:1}}>⚠️</span>
+          <div className="modal-title" style={{margin:0,fontSize:16}}>{title}</div>
+        </div>
+        <p style={{fontSize:13,color:'var(--text2)',lineHeight:1.6,marginBottom:24}}>{message}</p>
+        <div className="modal-actions" style={{marginTop:0}}>
+          <button className="btn-cancel" onClick={onCancel}>キャンセル</button>
+          <button className="btn-save" style={{background:'#ff5050'}} onClick={onConfirm}>削除する</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BacklogModal({backlog,onSave,onDelete,onClose}) {
+  const [form,setForm] = React.useState(backlog||{name:'',color:BL_COLORS[0]});
+  const [confirmDelete,setConfirmDelete] = React.useState(false);
+  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+  return (
+    <>
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal">
+        <div className="modal-title">{backlog?'バックログを編集':'新しいバックログ'}</div>
+        <div className="form-group">
+          <label className="form-label">バックログ名</label>
+          <input className="form-input" value={form.name} onChange={e=>set('name',e.target.value)}
+            placeholder="例：バックエンドAPI開発" autoFocus/>
+        </div>
+        <div className="form-group">
+          <label className="form-label">カラー</label>
+          <div className="color-swatches">
+            {BL_COLORS.map(c=>(
+              <div key={c} className={`color-swatch${form.color===c?' selected':''}`}
+                style={{background:c}} onClick={()=>set('color',c)}/>
+            ))}
+          </div>
+        </div>
+        <div className="modal-actions">
+          {backlog&&<button className="btn-delete" onClick={()=>setConfirmDelete(true)}>削除</button>}
+          <button className="btn-cancel" onClick={onClose}>キャンセル</button>
+          <button className="btn-save" onClick={()=>form.name&&onSave(form)}>保存</button>
+        </div>
+      </div>
+    </div>
+    {confirmDelete&&(
+      <ConfirmDialog
+        title="バックログを削除"
+        message={`「${form.name}」を削除します。配下のタスクもすべて削除されます。この操作は取り消せません。`}
+        onConfirm={()=>{ onDelete(backlog.id); onClose(); }}
+        onCancel={()=>setConfirmDelete(false)}
+      />
+    )}
+    </>
+  );
+}
+
+function TaskModal({task,backlogs,defaultBlId,prefill,onSave,onDelete,onClose}) {
+  // periods: [{start,end}, ...] に統一して管理
+  const initPeriods = React.useMemo(()=>{
+    if(task) return taskPeriods(task).length>0 ? taskPeriods(task) : [{start:tod(),end:ds(addD(new Date(),7))}];
+    return [{start:prefill?.start||tod(), end:prefill?.end||ds(addD(new Date(),7))}];
+  },[]);
+  const [form,setForm] = React.useState({
+    title: task?.title||'',
+    description: task?.description||'',
+    status: task?.status||prefill?.status||'todo',
+    blId: task?.blId||defaultBlId||(backlogs[0]?.id||''),
+  });
+  const [periods,setPeriods] = React.useState(initPeriods);
+  const [confirmDelete,setConfirmDelete] = React.useState(false);
+  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+
+  function setPeriod(i,k,v){
+    setPeriods(ps=>ps.map((p,j)=>j===i?{...p,[k]:v}:p));
+  }
+  function addPeriod(){
+    const last=periods[periods.length-1];
+    const newStart=ds(addD(new Date(last.end),2));
+    const newEnd=ds(addD(new Date(last.end),8));
+    setPeriods(ps=>[...ps,{start:newStart,end:newEnd}]);
+  }
+  function removePeriod(i){
+    if(periods.length<=1) return;
+    setPeriods(ps=>ps.filter((_,j)=>j!==i));
+  }
+
+  function handleSave(){
+    if(!form.title) return;
+    const sorted=[...periods].sort((a,b)=>a.start<b.start?-1:1);
+    // 後方互換: start/end も保持
+    onSave({...form, id:task?.id, periods:sorted, start:sorted[0].start, end:sorted[sorted.length-1].end});
+  }
+
+  return (
+    <>
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal">
+        <div className="modal-title">{task?'タスクを編集':'新しいタスク'}</div>
+        <div className="form-group">
+          <label className="form-label">バックログ</label>
+          <select className="form-select" value={form.blId} onChange={e=>set('blId',e.target.value)}>
+            {backlogs.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </div>
+        <div className="form-group">
+          <label className="form-label">タイトル</label>
+          <input className="form-input" value={form.title} onChange={e=>set('title',e.target.value)}
+            placeholder="タスク名を入力..." autoFocus/>
+        </div>
+        <div className="form-group">
+          <label className="form-label">説明</label>
+          <textarea className="form-textarea" value={form.description}
+            onChange={e=>set('description',e.target.value)} placeholder="詳細を入力..."/>
+        </div>
+        <div className="form-group">
+          <label className="form-label">ステータス</label>
+          <select className="form-select" value={form.status} onChange={e=>set('status',e.target.value)}>
+            {STATUSES.map(s=><option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
+          </select>
+        </div>
+        <div className="form-group">
+          <label className="form-label" style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+            <span>期間</span>
+            <button onClick={addPeriod} style={{
+              fontSize:11,fontWeight:700,padding:'2px 8px',borderRadius:4,border:'1px solid var(--accent)',
+              background:'rgba(232,255,71,0.08)',color:'var(--accent)',cursor:'pointer',fontFamily:'var(--font)'}}>
+              ＋ 期間追加
+            </button>
+          </label>
+          {periods.map((p,i)=>(
+            <div key={i} style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}>
+              <span style={{fontSize:11,color:'var(--text3)',fontFamily:'var(--mono)',minWidth:16,textAlign:'right'}}>{i+1}</span>
+              <input type="date" className="form-input" style={{flex:1}} value={p.start} onChange={e=>setPeriod(i,'start',e.target.value)}/>
+              <span style={{color:'var(--text3)',fontSize:12}}>→</span>
+              <input type="date" className="form-input" style={{flex:1}} value={p.end} onChange={e=>setPeriod(i,'end',e.target.value)}/>
+              {periods.length>1&&(
+                <button onClick={()=>removePeriod(i)} style={{
+                  width:22,height:22,border:'none',background:'rgba(255,80,80,0.12)',color:'#ff5050',
+                  borderRadius:4,cursor:'pointer',fontSize:13,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}>×</button>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="modal-actions">
+          {task&&<button className="btn-delete" onClick={()=>setConfirmDelete(true)}>削除</button>}
+          <button className="btn-cancel" onClick={onClose}>キャンセル</button>
+          <button className="btn-save" onClick={handleSave}>保存</button>
+        </div>
+      </div>
+    </div>
+    {confirmDelete&&(
+      <ConfirmDialog
+        title="タスクを削除"
+        message={`「${form.title}」を削除します。この操作は取り消せません。`}
+        onConfirm={()=>{ onDelete(task.id); onClose(); }}
+        onCancel={()=>setConfirmDelete(false)}
+      />
+    )}
+    </>
+  );
+}
+
+function GanttPopover({task,backlogs,anchorRect,onSave,onDelete,onClose}) {
+  const [form,setForm]=React.useState({...task});
+  const [periods,setPeriods]=React.useState(()=>taskPeriods(task).length>0?taskPeriods(task):[{start:task.start||tod(),end:task.end||ds(addD(new Date(),7))}]);
+  const [confirmDelete,setConfirmDelete]=React.useState(false);
+  const ref=React.useRef(null);
+  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+  function setPeriod(i,k,v){ setPeriods(ps=>ps.map((p,j)=>j===i?{...p,[k]:v}:p)); }
+  function addPeriod(){ const last=periods[periods.length-1]; setPeriods(ps=>[...ps,{start:ds(addD(new Date(last.end),2)),end:ds(addD(new Date(last.end),8))}]); }
+  function removePeriod(i){ if(periods.length<=1)return; setPeriods(ps=>ps.filter((_,j)=>j!==i)); }
+  React.useEffect(()=>{
+    function onDown(e){ if(ref.current&&!ref.current.contains(e.target)&&!confirmDelete) onClose(); }
+    setTimeout(()=>document.addEventListener('mousedown',onDown),0);
+    return ()=>document.removeEventListener('mousedown',onDown);
+  },[onClose,confirmDelete]);
+  const style=React.useMemo(()=>{
+    const W=320,H=Math.min(520,360+periods.length*40);
+    let left=anchorRect?anchorRect.left:window.innerWidth/2-W/2;
+    let top=anchorRect?anchorRect.bottom+8:80;
+    if(left+W>window.innerWidth-16) left=window.innerWidth-W-16;
+    if(left<8) left=8;
+    if(top+H>window.innerHeight-16) top=anchorRect?anchorRect.top-H-8:window.innerHeight-H-16;
+    return {top,left,width:W};
+  },[anchorRect,periods.length]);
+  function handleSave(){
+    if(!form.title) return;
+    const sorted=[...periods].sort((a,b)=>a.start<b.start?-1:1);
+    onSave({...form,periods:sorted,start:sorted[0].start,end:sorted[sorted.length-1].end});
+    onClose();
+  }
+  return (
+    <>
+    <div ref={ref} className="gantt-popover" style={style}>
+      <div className="gantt-pop-hdr">
+        <div className="gantt-pop-status-dot" style={{background:STATUS_COLORS[form.status]}}/>
+        <input className="gantt-pop-title" value={form.title}
+          onChange={e=>set('title',e.target.value)} placeholder="タスク名..." autoFocus/>
+        <button className="gantt-pop-close" onClick={onClose}>✕</button>
+      </div>
+      <div className="gantt-pop-row">
+        <div className="gantt-pop-label">バックログ</div>
+        <select className="gantt-pop-select" value={form.blId} onChange={e=>set('blId',e.target.value)}>
+          {backlogs.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+      </div>
+      <textarea className="gantt-pop-desc" value={form.description||''}
+        onChange={e=>set('description',e.target.value)} placeholder="説明（任意）..." rows={2}/>
+      <div className="gantt-pop-row">
+        <div className="gantt-pop-label">ステータス</div>
+        <div className="gantt-status-group">
+          {STATUSES.map(s=>(
+            <button key={s} className="gantt-status-chip"
+              style={form.status===s?{background:STATUS_COLORS[s],color:'#000',borderColor:STATUS_COLORS[s]}:{borderColor:STATUS_COLORS[s],color:STATUS_COLORS[s]}}
+              onClick={()=>set('status',s)}>{STATUS_LABELS[s]}</button>
+          ))}
+        </div>
+      </div>
+      <div className="gantt-pop-row">
+        <div className="gantt-pop-label" style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
+          <span>期間</span>
+          <button onClick={addPeriod} style={{
+            fontSize:10,fontWeight:700,padding:'2px 7px',borderRadius:4,border:'1px solid var(--accent)',
+            background:'rgba(232,255,71,0.08)',color:'var(--accent)',cursor:'pointer',fontFamily:'var(--font)'}}>
+            ＋ 追加
+          </button>
+        </div>
+        {periods.map((p,i)=>(
+          <div key={i} style={{display:'flex',alignItems:'center',gap:4,marginBottom:6}}>
+            <span style={{fontSize:10,color:'var(--text3)',fontFamily:'var(--mono)',minWidth:14,textAlign:'right'}}>{i+1}</span>
+            <input type="date" className="gantt-pop-date" style={{flex:1}} value={p.start} onChange={e=>setPeriod(i,'start',e.target.value)}/>
+            <span className="gantt-pop-arrow">→</span>
+            <input type="date" className="gantt-pop-date" style={{flex:1}} value={p.end} onChange={e=>setPeriod(i,'end',e.target.value)}/>
+            {periods.length>1&&(
+              <button onClick={()=>removePeriod(i)} style={{
+                width:20,height:20,border:'none',background:'rgba(255,80,80,0.12)',color:'#ff5050',
+                borderRadius:4,cursor:'pointer',fontSize:12,flexShrink:0,padding:0}}>×</button>
+            )}
+          </div>
+        ))}
+        {periods.map((p,i)=>p.start&&p.end&&(
+          <div key={'dur'+i} className="gantt-pop-dur" style={{marginBottom:2}}>
+            #{i+1} {Math.max(1,diff(p.start,p.end)+1)}日間
+          </div>
+        ))}
+      </div>
+      <div className="gantt-pop-actions">
+        <button className="gantt-pop-delete" onClick={()=>setConfirmDelete(true)}>削除</button>
+        <button className="gantt-pop-save" onClick={handleSave}>保存</button>
+      </div>
+    </div>
+    {confirmDelete&&(
+      <ConfirmDialog
+        title="タスクを削除"
+        message={`「${form.title}」を削除します。この操作は取り消せません。`}
+        onConfirm={()=>{ onDelete(task.id); onClose(); }}
+        onCancel={()=>setConfirmDelete(false)}
+      />
+    )}
+    </>
+  );
+}
+
+const HELP_CONTENT = {
+  kanban: {
+    title: 'カンバンの使い方',
+    sections: [
+      { heading:'バックログを追加する', rows:[
+        {icon:'☰', text:<><strong>左上の ☰</strong> をクリックしてサイドバーを開く</>},
+        {icon:'＋', text:<><strong>「＋ バックログ追加」</strong> をクリックして名前とカラーを設定</>},
+      ]},
+      { heading:'タスクを追加する', rows:[
+        {icon:'📋', text:<>各カラム下部の <strong>「＋ タスク追加」</strong> をクリック</>},
+        {icon:'📁', text:<>サイドバーのバックログ内 <strong>「＋ タスク追加」</strong> からも追加可能</>},
+        {icon:'✎', text:<><strong>バックログ・ステータス・開始日・終了日</strong> を設定して「保存」</>},
+      ]},
+      { heading:'タスクを操作する', rows:[
+        {icon:'🖱', text:<><strong>カードをドラッグ</strong> して別カラムにドロップするとステータスが変わる</>},
+        {icon:'⚠', text:<>期限超過は<strong style={{color:'#ff4444'}}>赤</strong>、今日期限は<strong style={{color:'#ffb400'}}>黄色</strong>のバッジで表示</>},
+        {icon:'✏', text:<><strong>カードをクリック</strong> して編集・削除</>},
+      ]},
+    ]
+  },
+  gantt: {
+    title: 'ガントチャートの使い方',
+    sections: [
+      { heading:'バックログ・タスクを追加する', rows:[
+        {icon:'☰', text:<><strong>左上の ☰</strong> でサイドバーを開き <strong>「＋ バックログ追加」</strong></>},
+        {icon:'＋', text:<>左パネルの <strong>「＋ タスク追加」</strong> でそのバックログにタスクを追加</>},
+        {icon:'✏', text:<>グリッドの<strong>空白部分をドラッグ</strong> すると期間を引いてタスク作成</>},
+      ]},
+      { heading:'バーを操作する', rows:[
+        {icon:'↔', text:<><strong>バーの中央をドラッグ</strong> すると日程ごと移動</>},
+        {icon:'◀', text:<><strong>バー左端をドラッグ</strong> すると開始日を変更</>},
+        {icon:'▶', text:<><strong>バー右端をドラッグ</strong> すると終了日を変更</>},
+        {icon:'✎', text:<>左パネルの <strong>✎ ボタン</strong> でタスクを編集</>},
+      ]},
+      { heading:'ナビゲーション', rows:[
+        {icon:'📅', text:<><strong>「今日」</strong> ボタンで現在の日付に戻る</>},
+        {icon:'‹›', text:<><strong>‹ › ボタン</strong> で14日単位で前後に移動</>},
+      ]},
+    ]
+  },
+  calendar: {
+    title: 'カレンダーの使い方',
+    sections: [
+      { heading:'タスクを確認する', rows:[
+        {icon:'📅', text:<>タスクは<strong>開始日〜終了日の期間中</strong>すべての日付に表示</>},
+        {icon:'🎨', text:<><strong>バックログのカラー</strong> でタスクを色分け表示</>},
+        {icon:'⚠', text:<>期限超過は<strong style={{color:'#ff4444'}}>赤</strong>、今日期限は<strong style={{color:'#ffb400'}}>黄色</strong>で強調表示</>},
+      ]},
+      { heading:'タスクを操作する', rows:[
+        {icon:'✏', text:<><strong>ピルをクリック</strong> してタスクを編集</>},
+        {icon:'‹›', text:<><strong>‹ › ボタン</strong> で月を移動、<strong>「今月」</strong> で当月に戻る</>},
+        {icon:'＋', text:<>タスク追加は<strong>カンバンビュー</strong>またはサイドバーから</>},
+      ]},
+    ]
+  },
+};
+
+function HelpModal({view,onClose}) {
+  const content=HELP_CONTENT[view];
+  if(!content) return null;
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="help-modal">
+        <div className="help-title">❓ {content.title}</div>
+        <div className="help-subtitle">TaskFlow の基本的な使い方を説明します</div>
+        {content.sections.map((sec,si)=>(
+          <div key={si} className="help-section">
+            {si>0&&<hr className="help-divider"/>}
+            <div className="help-section-title"><span>▍</span>{sec.heading}</div>
+            {sec.rows.map((row,ri)=>(
+              <div key={ri} className="help-row">
+                <div className="help-icon">{row.icon}</div>
+                <div className="help-text">{row.text}</div>
+              </div>
+            ))}
+          </div>
+        ))}
+        <button className="help-close" onClick={onClose}>閉じる</button>
+      </div>
+    </div>
+  );
+}
+</script>
+
+<!-- ============================================================
+     components/Sidebar.jsx
+     ============================================================ -->
+<script type="text/babel">
+function Sidebar({backlogs,tasks,onEditBl,onAddBl,onAddTask,onEditTask}) {
+  const [open,setSidebarOpen]=React.useState(false);
+  const [expanded,setExpanded]=React.useState(()=>Object.fromEntries(backlogs.map(b=>[b.id,false])));
+  React.useEffect(()=>{
+    setExpanded(e=>{
+      const n={...e};
+      backlogs.forEach(b=>{ if(!(b.id in n)) n[b.id]=false; });
+      return n;
+    });
+  },[backlogs]);
+  return (
+    <div className={`sidebar ${open?'open':'closed'}`}>
+      <div className="sidebar-toggle" onClick={()=>setSidebarOpen(o=>!o)}>
+        {open?'←':'☰'}
+      </div>
+      {open?(
+        <div className="sidebar-inner">
+          <div className="sidebar-hdr">
+            <div className="sidebar-title">バックログ</div>
+            <button className="btn-add-bl" onClick={onAddBl}>＋ バックログ追加</button>
+          </div>
+          <div className="sidebar-list">
+            {backlogs.map(bl=>{
+              const blTasks=tasks.filter(t=>t.blId===bl.id);
+              const isOpen=expanded[bl.id];
+              return (
+                <div key={bl.id} className="bl-item">
+                  <div className="bl-item-hdr" onClick={()=>setExpanded(e=>({...e,[bl.id]:!e[bl.id]}))}>
+                    <div className="bl-color" style={{background:bl.color}}/>
+                    <span className="bl-name">{bl.name}</span>
+                    <span className="bl-cnt">{blTasks.length}</span>
+                    <div onClick={e=>e.stopPropagation()}>
+                      <button className="bl-mini-btn" onClick={()=>onEditBl(bl)}>✎</button>
+                    </div>
+                    <span className={`bl-chevron${isOpen?' open':''}`}>▶</span>
+                  </div>
+                  {isOpen&&(
+                    <div className="bl-tasks">
+                      {blTasks.map(t=>(
+                        <div key={t.id} className="bl-task-row" onClick={()=>onEditTask(t)}>
+                          <div className="t-status-dot" style={{background:STATUS_COLORS[t.status]}}/>
+                          <span className="bl-task-name">{t.title}</span>
+                          <span className="bl-task-date">{fmt(taskLastEnd(t))}</span>
+                        </div>
+                      ))}
+                      <div className="bl-add-task" onClick={()=>onAddTask(bl.id)}>＋ タスク追加</div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ):(
+        <div className="sidebar-icons">
+          <button className="sidebar-icon-btn" onClick={()=>{ setSidebarOpen(true); onAddBl(); }}>
+            <span style={{fontSize:16,color:'var(--text3)'}}>＋</span>
+            <span className="sidebar-icon-tooltip">バックログ追加</span>
+          </button>
+          {backlogs.map(bl=>(
+            <button key={bl.id} className="sidebar-icon-btn" onClick={()=>setSidebarOpen(true)}>
+              <div className="sidebar-icon-dot" style={{background:bl.color}}/>
+              <span className="sidebar-icon-tooltip">{bl.name}（{tasks.filter(t=>t.blId===bl.id).length}）</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+</script>
+
+<!-- ============================================================
+     components/KanbanView.jsx
+     ============================================================ -->
+<script type="text/babel">
+function KanbanView({backlogs,tasks,onUpdate,onDelete,onEdit,onAddTask}) {
+  const [dragging,setDragging]=React.useState(null);
+  const [overCol,setOverCol]=React.useState(null);
+  const cols=React.useMemo(()=>STATUSES.reduce((a,s)=>({...a,[s]:tasks.filter(t=>t.status===s)}),{}),[tasks]);
+  const getBl=id=>backlogs.find(b=>b.id===id);
+  return (
+    <div className="kanban">
+      {STATUSES.map(status=>(
+        <div key={status} className={`kanban-col${overCol===status?' drag-over':''}`}
+          onDragOver={e=>{e.preventDefault();setOverCol(status);}}
+          onDragLeave={()=>setOverCol(null)}
+          onDrop={e=>{
+            e.preventDefault();
+            if(dragging&&dragging.status!==status) onUpdate({...dragging,status});
+            setDragging(null);setOverCol(null);
+          }}>
+          <div className="col-header">
+            <div className="col-label">
+              <div className="col-dot" style={{background:STATUS_COLORS[status]}}/>
+              {STATUS_LABELS[status]}
+            </div>
+            <span className="col-count">{cols[status].length}</span>
+          </div>
+          <div className="col-tasks">
+            {cols[status].length===0&&(
+              <div className="empty-col"><span style={{fontSize:20}}>○</span><span>タスクなし</span></div>
+            )}
+            {cols[status].map(task=>{
+              const bl=getBl(task.blId);
+              const dl=deadlineStatus(task);
+              return (
+                <div key={task.id}
+                  className={`task-card${dragging?.id===task.id?' dragging':''}${dl?' '+dl:''}`}
+                  draggable onDragStart={()=>setDragging(task)}
+                  onDragEnd={()=>{setDragging(null);setOverCol(null);}}
+                  onClick={()=>onEdit(task)}>
+                  {bl&&<span className="task-card-bl" style={{background:bl.color+'22',color:bl.color}}>{bl.name}</span>}
+                  <div className="task-card-title">{task.title}</div>
+                  {task.description&&<div className="task-card-desc">{task.description}</div>}
+                  <div className="task-card-footer">
+                    <span className="task-card-dates">{fmt(taskFirstStart(task))} → {fmt(taskLastEnd(task))}{taskPeriods(task).length>1&&<span style={{marginLeft:4,fontSize:10,opacity:0.7}}>({taskPeriods(task).length}期間)</span>}</span>
+                    {dl==='overdue'   &&<span className="deadline-badge overdue">⚠ 期限超過</span>}
+                    {dl==='due-today' &&<span className="deadline-badge due-today">● 今日期限</span>}
+                  </div>
+                  <div className="status-bar" style={{background:STATUS_COLORS[task.status]}}/>
+                </div>
+              );
+            })}
+            <button className="col-add-btn" onClick={()=>onAddTask(status)}>＋ タスク追加</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+</script>
+
+<!-- ============================================================
+     components/GanttView.jsx
+     ============================================================ -->
+<script type="text/babel">
+function GanttView({backlogs,tasks,onUpdate,onDelete,onCreateTask}) {
+  const todayStr=tod();
+  const [offset,setOffset]=React.useState(-7);
+  const DAYS=60;
+  const [collapsed,setCollapsed]=React.useState(()=>Object.fromEntries(backlogs.map(b=>[b.id,false])));
+  React.useEffect(()=>{
+    setCollapsed(c=>{
+      const n={...c};
+      backlogs.forEach(b=>{ if(!(b.id in n)) n[b.id]=false; });
+      return n;
+    });
+  },[backlogs]);
+  const [dragState,setDragState]=React.useState(null);
+  const [preview,setPreview]=React.useState(null);
+  const [tooltip,setTooltip]=React.useState(null);
+  const [popover,setPopover]=React.useState(null);
+  const [createPrev,setCreatePrev]=React.useState(null);
+  const previewRef=React.useRef(null);
+  const draggedRef=React.useRef(false);
+  React.useEffect(()=>{ previewRef.current=preview; },[preview]);
+  const isDragging=!!dragState;
+
+  const days=React.useMemo(()=>Array.from({length:DAYS},(_,i)=>{
+    const d=addD(new Date(),offset+i);
+    const dow=d.getDay();
+    return {date:d,str:ds(d),isToday:ds(d)===todayStr,isSat:dow===6,isSun:dow===0};
+  }),[offset,todayStr]);
+
+  const first=days[0].str;
+  const totalW=DAYS*DAY_W;
+  const xFor=s=>diff(first,s)*DAY_W;
+  const wFor=(s,e)=>Math.max((diff(s,e)+1)*DAY_W,DAY_W);
+  const todayX=xFor(todayStr);
+
+  const rows=React.useMemo(()=>{
+    const result=[];
+    backlogs.forEach(bl=>{
+      // periodsのどれかが表示範囲と重なるタスクを表示
+      const blTasks=tasks.filter(t=>t.blId===bl.id&&taskPeriods(t).some(p=>
+        p.end>=days[0].str&&p.start<=days[days.length-1].str));
+      result.push({type:'group',bl,count:blTasks.length});
+      if(!collapsed[bl.id]){
+        blTasks.forEach(t=>result.push({type:'task',task:t,bl}));
+        result.push({type:'add',bl});
+      }
+    });
+    return result;
+  },[backlogs,tasks,days,collapsed]);
+
+  const renderedRows=React.useMemo(()=>
+    rows.map(r=>r.type==='task'&&preview&&r.task.id===preview.id?{...r,task:preview}:r),
+    [rows,preview]);
+
+  function startDrag(e,task,type,periodIdx){
+    e.stopPropagation();e.preventDefault();
+    const ps=taskPeriods(task);
+    const p=ps[periodIdx];
+    const os=p.start,oe=p.end;
+    let moved=false;
+    draggedRef.current=false;
+    setDragState({type,task,periodIdx});
+    function onMove(ev){
+      if(!moved&&Math.abs(ev.clientX-sx)>4){ moved=true; draggedRef.current=true; }
+      if(!moved) return;
+      const dd=Math.round((ev.clientX-sx)/DAY_W);
+      let np;
+      if(type==='move') np={start:ds(addD(new Date(os),dd)),end:ds(addD(new Date(oe),dd))};
+      else if(type==='resize-right'){ const ne=ds(addD(new Date(oe),dd)); if(ne<os)return; np={start:os,end:ne}; }
+      else if(type==='resize-left'){ const ns=ds(addD(new Date(os),dd)); if(ns>oe)return; np={start:ns,end:oe}; }
+      if(np){
+        const newPs=ps.map((pp,i)=>i===periodIdx?np:pp);
+        const sorted=[...newPs].sort((a,b)=>a.start<b.start?-1:1);
+        setPreview({...task,periods:sorted,start:sorted[0].start,end:sorted[sorted.length-1].end});
+      }
+    }
+    const sx=e.clientX;
+    function onUp(){
+      if(draggedRef.current&&previewRef.current) onUpdate(previewRef.current);
+      setDragState(null);setPreview(null);setTooltip(null);
+      window.removeEventListener('mousemove',onMove);
+      window.removeEventListener('mouseup',onUp);
+    }
+    window.addEventListener('mousemove',onMove);
+    window.addEventListener('mouseup',onUp);
+  }
+
+  function handleCreateStart(e,rowKey,blId){
+    if(isDragging) return;
+    e.preventDefault();
+    const se=document.getElementById('gantt-scroll');
+    if(!se) return;
+    const seRect=se.getBoundingClientRect();
+    const x0=e.clientX-seRect.left+se.scrollLeft;
+    function onMove(ev){
+      const cx=ev.clientX-seRect.left+se.scrollLeft;
+      setCreatePrev({rowKey,left:Math.min(x0,cx),width:Math.abs(cx-x0)});
+    }
+    function onUp(ev){
+      const cx=ev.clientX-seRect.left+se.scrollLeft;
+      const l=Math.min(x0,cx),r=Math.max(x0,cx);
+      if(r-l>DAY_W/2){
+        const s=ds(addD(new Date(first),Math.floor(l/DAY_W)));
+        const en=ds(addD(new Date(first),Math.floor(r/DAY_W)));
+        onCreateTask({blId,start:s,end:en});
+      }
+      setCreatePrev(null);
+      window.removeEventListener('mousemove',onMove);
+      window.removeEventListener('mouseup',onUp);
+    }
+    window.addEventListener('mousemove',onMove);
+    window.addEventListener('mouseup',onUp);
+  }
+
+  return (
+    <div className="gantt-container">
+      <div className="gantt-toolbar">
+        <span className="gantt-toolbar-title">ガントチャート</span>
+        <div className="gantt-nav">
+          <button className="nav-btn" onClick={()=>setOffset(o=>o-14)}>‹</button>
+          <button className="nav-btn" onClick={()=>{ setOffset(-7); const se=document.getElementById('gantt-scroll'); if(se) se.scrollLeft=0; }}>今日</button>
+          <button className="nav-btn" onClick={()=>setOffset(o=>o+14)}>›</button>
+        </div>
+        <span className="gantt-period">{fmt(days[0].str)} – {fmt(days[DAYS-1].str)}</span>
+        <div className="gantt-hints">
+          <span className="gantt-hint-chip">↔ ドラッグで移動</span>
+          <span className="gantt-hint-chip">◀▶ 端で期間変更</span>
+          <span className="gantt-hint-chip">空白ドラッグで作成</span>
+        </div>
+      </div>
+      <div className="gantt-body">
+        <div className="gantt-left">
+          <div className="gantt-left-header">タスク</div>
+          <div className="gantt-left-rows" id="gantt-left-rows">
+            {renderedRows.map(row=>{
+              if(row.type==='group') return (
+                <div key={row.bl.id+'-g'} className="gantt-group-row"
+                  onClick={()=>setCollapsed(c=>({...c,[row.bl.id]:!c[row.bl.id]}))}>
+                  <div className="gantt-group-color" style={{background:row.bl.color}}/>
+                  <span className="gantt-group-name">{row.bl.name}</span>
+                  <span className="gantt-group-count">{row.count}</span>
+                  <span className={`gantt-group-chevron${!collapsed[row.bl.id]?' open':''}`}>▶</span>
+                </div>
+              );
+              if(row.type==='add') return (
+                <div key={row.bl.id+'-add'} className="gantt-row-add"
+                  onClick={()=>onCreateTask({blId:row.bl.id})}>＋ タスク追加</div>
+              );
+              const {task,bl}=row;
+              return (
+                <div key={task.id} className="gantt-row-label"
+                  onClick={()=>setPopover({task,rect:null})}>
+                  <div className="gantt-row-dot" style={{background:STATUS_COLORS[task.status]}}/>
+                  <div style={{flex:1,overflow:'hidden'}}>
+                    <div className="gantt-row-name">{task.title}</div>
+                    <div className="gantt-row-dates">{fmt(taskFirstStart(task))} – {fmt(taskLastEnd(task))}{taskPeriods(task).length>1&&` (${taskPeriods(task).length}期間)`}</div>
+                  </div>
+                  <button className="gantt-row-edit-btn"
+                    onClick={e=>{e.stopPropagation();setPopover({task,rect:e.currentTarget.getBoundingClientRect()});}}>✎</button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div className="gantt-right">
+          <div className="gantt-scroll" id="gantt-scroll" onScroll={e=>{
+            const lr=document.getElementById('gantt-left-rows');
+            if(lr) lr.scrollTop=e.target.scrollTop;
+          }}>
+            <div className="gantt-grid" style={{width:totalW,minWidth:totalW}}>
+              <div className="gantt-header-row">
+                {days.map(d=>(
+                  <div key={d.str} className={`gantt-day-header${d.isToday?' today':''}${d.isSat?' saturday':''}${d.isSun?' sunday':''}`} style={{width:DAY_W}}>
+                    <span className="day-num">{d.date.getDate()}</span>
+                    <span className="day-name">{'日月火水木金土'[d.date.getDay()]}</span>
+                  </div>
+                ))}
+              </div>
+              {todayX>=0&&todayX<=totalW&&(
+                <div className="gantt-today-line" style={{left:todayX+DAY_W/2}}/>
+              )}
+              <div className="gantt-rows">
+                {renderedRows.map(row=>{
+                  const rowKey=row.type==='group'?row.bl.id+'-g':row.type==='add'?row.bl.id+'-add':row.task.id;
+                  if(row.type==='group') return (
+                    <div key={rowKey} className="gantt-grid-group" style={{width:totalW}}>
+                      {days.map(d=>(
+                        <div key={d.str} className="gantt-grid-group-cell"
+                          style={{width:DAY_W,background:d.isSat?'rgba(74,158,255,0.06)':d.isSun?'rgba(255,80,80,0.06)':row.bl.color+'0a'}}/>
+                      ))}
+                    </div>
+                  );
+                  if(row.type==='add') return (
+                    <div key={rowKey} className="gantt-data-row" style={{width:totalW}}>
+                      {days.map(d=>(
+                        <div key={d.str} className={`gantt-cell${d.isSat?' saturday':''}${d.isSun?' sunday':''}${d.isToday?' today-col':''}`} style={{width:DAY_W}}/>
+                      ))}
+                      <div className="gantt-create-zone" onMouseDown={e=>handleCreateStart(e,rowKey,row.bl.id)}/>
+                      {createPrev&&createPrev.rowKey===rowKey&&(
+                        <div className="gantt-create-preview" style={{left:createPrev.left,width:createPrev.width}}/>
+                      )}
+                    </div>
+                  );
+                  const {task,bl}=row;
+                  const isActive=dragState?.task?.id===task.id;
+                  const dl=deadlineStatus(task);
+                  const activePeriods=taskPeriods(preview&&isActive?preview:task);
+                  return (
+                    <div key={task.id} className="gantt-data-row" style={{width:totalW}}>
+                      {days.map(d=>(
+                        <div key={d.str} className={`gantt-cell${d.isSat?' saturday':''}${d.isSun?' sunday':''}${d.isToday?' today-col':''}`} style={{width:DAY_W}}/>
+                      ))}
+                      <div className="gantt-create-zone" onMouseDown={e=>handleCreateStart(e,task.id,bl.id)}/>
+                      {createPrev&&createPrev.rowKey===task.id&&(
+                        <div className="gantt-create-preview" style={{left:createPrev.left,width:createPrev.width}}/>
+                      )}
+                      <div className="gantt-bar-layer">
+                        {activePeriods.map((p,pi)=>{
+                          const x=xFor(p.start),w=wFor(p.start,p.end);
+                          const cx=Math.max(0,x),cw=Math.min(w+Math.min(0,x),totalW-cx);
+                          if(cw<=0) return null;
+                          const isDraggingThis=isActive&&dragState?.periodIdx===pi;
+                          return (
+                            <div key={pi} className={`gantt-bar${isActive&&isDraggingThis?' is-dragging':''}${dl?' '+dl:''}`}
+                              style={{left:cx,width:cw,background:bl.color}}
+                              onMouseDown={e=>e.stopPropagation()}
+                              onMouseEnter={e=>setTooltip({task:preview&&isActive?preview:task,bl,x:e.clientX,y:e.clientY,periodIdx:pi})}
+                              onMouseLeave={()=>!isDragging&&setTooltip(null)}
+                              onMouseMove={e=>setTooltip(t=>t?{...t,x:e.clientX,y:e.clientY}:null)}>
+                              <div className="gantt-bar-resize gantt-bar-resize-left"
+                                onMouseDown={e=>{e.stopPropagation();startDrag(e,task,'resize-left',pi);}}>⋮</div>
+                              <div className="gantt-bar-inner"
+                                onMouseDown={e=>{e.stopPropagation();startDrag(e,task,'move',pi);}}>
+                                {pi===0?task.title:''}
+                                {isDraggingThis&&preview&&(
+                                  <span className="gantt-drag-dates">{fmt(activePeriods[pi].start)}–{fmt(activePeriods[pi].end)}</span>
+                                )}
+                              </div>
+                              <div className="gantt-bar-resize gantt-bar-resize-right"
+                                onMouseDown={e=>{e.stopPropagation();startDrag(e,task,'resize-right',pi);}}>⋮</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      {tooltip&&(
+        <div className="gantt-tooltip" style={{left:tooltip.x+14,top:tooltip.y-10}}>
+          <div className="gantt-tooltip-title">{tooltip.task.title}</div>
+          <span className="gantt-tooltip-bl" style={{background:tooltip.bl.color+'22',color:tooltip.bl.color}}>{tooltip.bl.name}</span>
+          {tooltip.task.description&&<div className="gantt-tooltip-desc">{tooltip.task.description}</div>}
+          {taskPeriods(tooltip.task).map((p,i)=>(
+            <div key={i} className="gantt-tooltip-dates" style={{marginTop:i>0?3:0}}>
+              {taskPeriods(tooltip.task).length>1&&<span style={{color:'var(--text3)',marginRight:4}}>#{i+1}</span>}
+              <span style={{color:STATUS_COLORS[tooltip.task.status]}}>{STATUS_LABELS[tooltip.task.status]}</span>
+              &nbsp;·&nbsp;{fmt(p.start)}&nbsp;→&nbsp;{fmt(p.end)}
+              &nbsp;·&nbsp;{Math.max(1,diff(p.start,p.end)+1)}日間
+            </div>
+          ))}
+        </div>
+      )}
+      {popover&&(
+        <GanttPopover task={popover.task} backlogs={backlogs} anchorRect={popover.rect}
+          onSave={t=>{onUpdate(t);setPopover(null);}}
+          onDelete={id=>{onDelete(id);setPopover(null);}}
+          onClose={()=>setPopover(null)}/>
+      )}
+    </div>
+  );
+}
+</script>
+
+<!-- ============================================================
+     components/CalendarView.jsx
+     ============================================================ -->
+<script type="text/babel">
+function CalendarView({backlogs,tasks,onEditTask}) {
+  const [calDate,setCalDate]=React.useState(new Date());
+  const year=calDate.getFullYear(),month=calDate.getMonth();
+  const todayStr=tod();
+  const calDays=React.useMemo(()=>{
+    const first=new Date(year,month,1),last=new Date(year,month+1,0);
+    const cells=[];
+    for(let i=first.getDay()-1;i>=0;i--) cells.push({date:addD(first,-i-1),other:true});
+    for(let d=1;d<=last.getDate();d++) cells.push({date:new Date(year,month,d),other:false});
+    const rem=42-cells.length;
+    for(let i=1;i<=rem;i++) cells.push({date:addD(last,i),other:true});
+    return cells;
+  },[year,month]);
+  const getBl=id=>backlogs.find(b=>b.id===id);
+  const mns=['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+  return (
+    <div className="calendar-container">
+      <div className="calendar-header">
+        <button className="nav-btn" onClick={()=>setCalDate(new Date(year,month-1,1))}>‹</button>
+        <span className="calendar-title">{year}年 {mns[month]}</span>
+        <button className="nav-btn" onClick={()=>setCalDate(new Date(year,month+1,1))}>›</button>
+        <button className="nav-btn" onClick={()=>setCalDate(new Date())} style={{marginLeft:4,fontSize:11,width:'auto',padding:'0 10px'}}>今月</button>
+        <div className="cal-legend">
+          {STATUSES.map(s=>(
+            <div key={s} className="cal-legend-item">
+              <div className="cal-legend-dot" style={{background:STATUS_COLORS[s]}}/>
+              {STATUS_LABELS[s]}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="calendar-grid">
+        <div className="calendar-weekdays">
+          {['日','月','火','水','木','金','土'].map((d,i)=>(
+            <div key={d} className={`cal-weekday${i===0?' sunday':i===6?' saturday':''}`}>{d}</div>
+          ))}
+        </div>
+        <div className="calendar-days">
+          {calDays.map((cell,i)=>{
+            const dstr=ds(cell.date);
+            const dow=cell.date.getDay();
+            const dayTasks=tasks.filter(t=>taskPeriods(t).some(p=>p.start&&p.end&&dstr>=p.start&&dstr<=p.end));
+            return (
+              <div key={i} className={`cal-day${cell.other?' other-month':''}${dstr===todayStr?' today':''}${dow===6?' saturday':''}${dow===0?' sunday':''}`}>
+                <div className="cal-day-num">{cell.date.getDate()}</div>
+                {dayTasks.slice(0,3).map(t=>{
+                  const bl=getBl(t.blId);
+                  const dl=deadlineStatus(t);
+                  const lastEnd=taskLastEnd(t);
+                  const isEndDay=dstr===lastEnd;
+                  return (
+                    <div key={t.id} className="cal-task-pill"
+                      style={{
+                        background:dl==='overdue'?'rgba(255,60,60,0.15)':dl==='due-today'?'rgba(255,180,0,0.15)':(bl?.color||'#888')+'22',
+                        color:dl==='overdue'?'#ff4444':dl==='due-today'?'#ffb400':bl?.color||'#888',
+                        border:`1px solid ${dl==='overdue'?'rgba(255,60,60,0.4)':dl==='due-today'?'rgba(255,180,0,0.4)':(bl?.color||'#888')+'40'}`,
+                      }}
+                      onClick={()=>onEditTask(t)}>
+                      {dl==='overdue'&&isEndDay?'⚠ ':dl==='due-today'&&isEndDay?'● ':''}{t.title}
+                    </div>
+                  );
+                })}
+                {dayTasks.length>3&&<div className="cal-more">+{dayTasks.length-3}</div>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+</script>
+
+<!-- ============================================================
+     components/App.jsx
+     ============================================================ -->
+<script type="text/babel">
+function App() {
+  const [backlogs,setBacklogs]=React.useState(INIT_BL);
+  const [tasks,setTasks]=React.useState(()=>_initTasks());
+  const [view,setView]=React.useState('kanban');
+  const [taskModal,setTaskModal]=React.useState(null);
+  const [blModal,setBlModal]=React.useState(null);
+  const [showHelp,setShowHelp]=React.useState(false);
+
+  function saveBl(form){
+    setBacklogs(bs=>{
+      const ex=bs.find(b=>b.id===form.id);
+      return ex?bs.map(b=>b.id===form.id?{...form}:b):[...bs,{...form,id:uid()}];
+    });
+    setBlModal(null);
+  }
+  function deleteBl(id){
+    setBacklogs(bs=>bs.filter(b=>b.id!==id));
+    setTasks(ts=>ts.filter(t=>t.blId!==id));
+    setBlModal(null);
+  }
+  function saveTask(form){
+    setTasks(ts=>{
+      const ex=ts.find(t=>t.id===form.id);
+      return ex?ts.map(t=>t.id===form.id?{...form}:t):[...ts,{...form,id:uid()}];
+    });
+    setTaskModal(null);
+  }
+  function deleteTask(id){ setTasks(ts=>ts.filter(t=>t.id!==id)); setTaskModal(null); }
+  function updateTask(t){ setTasks(ts=>ts.map(x=>x.id===t.id?t:x)); }
+
+  return (
+    <>
+      <div className="header">
+        <div className="logo"><div className="logo-dot"/>TaskFlow</div>
+        <div className="tab-group">
+          <button className={`tab${view==='kanban'?' active':''}`} onClick={()=>setView('kanban')}>カンバン</button>
+          <button className={`tab${view==='gantt'?' active':''}`} onClick={()=>setView('gantt')}>ガント</button>
+          <button className={`tab${view==='calendar'?' active':''}`} onClick={()=>setView('calendar')}>カレンダー</button>
+        </div>
+        <div className="spacer"/>
+        <span className="hdr-count">{tasks.length} tasks</span>
+        <button className="help-btn" onClick={()=>setShowHelp(true)}>?</button>
+      </div>
+      <div className="main">
+        <div className="layout">
+          <Sidebar backlogs={backlogs} tasks={tasks}
+            onEditBl={bl=>setBlModal({backlog:bl})}
+            onAddBl={()=>setBlModal({})}
+            onAddTask={blId=>setTaskModal({task:null,defaultBlId:blId})}
+            onEditTask={t=>setTaskModal({task:t,defaultBlId:t.blId})}/>
+          <div className="content">
+            {view==='kanban'&&(
+              <KanbanView backlogs={backlogs} tasks={tasks} onUpdate={updateTask}
+                onDelete={deleteTask} onEdit={t=>setTaskModal({task:t,defaultBlId:t.blId})}
+                onAddTask={status=>setTaskModal({task:null,defaultBlId:backlogs[0]?.id,prefill:{status}})}/>
+            )}
+            {view==='gantt'&&(
+              <GanttView backlogs={backlogs} tasks={tasks} onUpdate={updateTask}
+                onDelete={deleteTask}
+                onCreateTask={d=>setTaskModal({task:null,defaultBlId:d.blId||backlogs[0]?.id,prefill:d})}/>
+            )}
+            {view==='calendar'&&(
+              <CalendarView backlogs={backlogs} tasks={tasks}
+                onEditTask={t=>setTaskModal({task:t,defaultBlId:t.blId})}/>
+            )}
+          </div>
+        </div>
+      </div>
+      {showHelp&&<HelpModal view={view} onClose={()=>setShowHelp(false)}/>}
+      {taskModal!==null&&(
+        <TaskModal task={taskModal.task} backlogs={backlogs}
+          defaultBlId={taskModal.defaultBlId}
+          prefill={taskModal.prefill}
+          onSave={saveTask} onDelete={deleteTask} onClose={()=>setTaskModal(null)}/>
+      )}
+      {blModal!==null&&(
+        <BacklogModal backlog={blModal.backlog||null}
+          onSave={saveBl} onDelete={deleteBl} onClose={()=>setBlModal(null)}/>
+      )}
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
