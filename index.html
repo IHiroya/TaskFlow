@@ -18,10 +18,12 @@
      utils.js
      ============================================================ -->
 <script type="text/babel">
-function fmt(d) { if(!d) return ''; return new Date(d).toLocaleDateString('ja-JP',{year:'numeric',month:'long',day:'numeric'}); }
-function ds(d) { return d.toISOString().slice(0,10); }
-function addD(d,n) { const x=new Date(d); x.setDate(x.getDate()+n); return x; }
-function diff(a,b) { return Math.round((new Date(b)-new Date(a))/86400000); }
+function fmt(d) { if(!d) return ''; return parseDate(d).toLocaleDateString('ja-JP',{year:'numeric',month:'long',day:'numeric'}); }
+function pad2(n){return String(n).padStart(2,'0');}
+function ds(d) { return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
+function parseDate(s) { if(!s) return new Date(); const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); }
+function addD(d,n) { const x = typeof d==='string' ? parseDate(d) : new Date(d); x.setDate(x.getDate()+n); return x; }
+function diff(a,b) { return Math.round((parseDate(b)-parseDate(a))/86400000); }
 function tod() { return ds(new Date()); }
 function uid() { return Date.now().toString(36)+Math.random().toString(36).slice(2); }
 // タスクの全期間を正規化: periods[]があればそれ、なければstart/endから生成
@@ -133,6 +135,139 @@ function BacklogModal({backlog,onSave,onDelete,onClose}) {
   );
 }
 
+// ── INLINE CALENDAR RANGE PICKER ──
+// startVal/endVal: 'YYYY-MM-DD'
+// クリック1回目=開始日、2回目=終了日（start より前なら開始日を再設定）
+function DateRangePicker({startVal, endVal, onChangeStart, onChangeEnd}) {
+  const [calYear,  setCalYear]  = React.useState(()=>startVal?parseDate(startVal).getFullYear():new Date().getFullYear());
+  const [calMonth, setCalMonth] = React.useState(()=>startVal?parseDate(startVal).getMonth():new Date().getMonth());
+  const [picking,  setPicking]  = React.useState('start'); // 'start' | 'end'
+
+  const todayStr = tod();
+
+  const cells = React.useMemo(()=>{
+    const first = new Date(calYear, calMonth, 1);
+    const last  = new Date(calYear, calMonth+1, 0);
+    const result = [];
+    for(let i=first.getDay()-1; i>=0; i--) result.push({date:addD(first,-i-1), other:true});
+    for(let d=1; d<=last.getDate(); d++)   result.push({date:new Date(calYear,calMonth,d), other:false});
+    while(result.length%7!==0) result.push({date:addD(last, result.length-last.getDate()-first.getDay()+2), other:true});
+    return result;
+  },[calYear,calMonth]);
+
+  function handleDayClick(dstr, other) {
+    if(other) return;
+    if(picking==='start') {
+      onChangeStart(dstr);
+      if(dstr > endVal) onChangeEnd(dstr);
+      setPicking('end');
+    } else {
+      if(dstr < startVal) {
+        onChangeStart(dstr);
+        setPicking('end');
+      } else {
+        onChangeEnd(dstr);
+        setPicking('start');
+      }
+    }
+  }
+
+  const durDays = React.useMemo(()=>{
+    if(!startVal||!endVal) return 0;
+    return Math.max(1, diff(startVal,endVal)+1);
+  },[startVal,endVal]);
+
+  const mns=['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+
+  function prevMonth(){ if(calMonth===0){setCalYear(y=>y-1);setCalMonth(11);}else setCalMonth(m=>m-1); }
+  function nextMonth(){ if(calMonth===11){setCalYear(y=>y+1);setCalMonth(0);}else setCalMonth(m=>m+1); }
+
+  return (
+    <div style={{background:'var(--surface2)',borderRadius:10,overflow:'hidden',marginBottom:8}}>
+      {/* 選択状態バー */}
+      <div style={{display:'flex',borderBottom:'1px solid var(--border)'}}>
+        {['start','end'].map(mode=>(
+          <button key={mode} onClick={()=>setPicking(mode)} style={{
+            flex:1, padding:'8px 6px', border:'none', cursor:'pointer',
+            background: picking===mode ? 'rgba(232,255,71,0.08)' : 'transparent',
+            borderBottom: picking===mode ? '2px solid var(--accent)' : '2px solid transparent',
+            fontFamily:'var(--font)', fontSize:11, fontWeight:700,
+            color: picking===mode ? 'var(--accent)' : 'var(--text3)',
+            transition:'all 0.15s',
+          }}>
+            <div style={{fontSize:9,opacity:0.7,marginBottom:2}}>{mode==='start'?'開始日':'終了日'}</div>
+            <div style={{fontSize:13, color: picking===mode?'var(--accent)':'var(--text)'}}>
+              {mode==='start' ? (startVal ? fmt(startVal) : '--') : (endVal ? fmt(endVal) : '--')}
+            </div>
+          </button>
+        ))}
+        <div style={{display:'flex',alignItems:'center',padding:'0 10px',borderLeft:'1px solid var(--border)',
+          fontSize:11,color:'var(--accent)',fontFamily:'var(--mono)',fontWeight:700,whiteSpace:'nowrap'}}>
+          {durDays>0 ? `${durDays}日間` : '--'}
+        </div>
+      </div>
+
+      {/* カレンダーヘッダー */}
+      <div style={{display:'flex',alignItems:'center',padding:'8px 10px 4px',gap:6}}>
+        <button onClick={prevMonth} style={{width:24,height:24,border:'1px solid var(--border)',borderRadius:5,
+          background:'var(--surface3)',color:'var(--text2)',cursor:'pointer',fontSize:12,display:'flex',alignItems:'center',justifyContent:'center'}}>‹</button>
+        <span style={{flex:1,textAlign:'center',fontSize:13,fontWeight:700}}>{calYear}年 {mns[calMonth]}</span>
+        <button onClick={nextMonth} style={{width:24,height:24,border:'1px solid var(--border)',borderRadius:5,
+          background:'var(--surface3)',color:'var(--text2)',cursor:'pointer',fontSize:12,display:'flex',alignItems:'center',justifyContent:'center'}}>›</button>
+      </div>
+
+      {/* 曜日ヘッダー */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',padding:'0 6px'}}>
+        {['日','月','火','水','木','金','土'].map((d,i)=>(
+          <div key={d} style={{textAlign:'center',fontSize:10,fontWeight:700,padding:'3px 0',
+            color: i===0?'#ff5050':i===6?'#4a9eff':'var(--text3)'}}>
+            {d}
+          </div>
+        ))}
+      </div>
+
+      {/* 日付グリッド */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',padding:'0 6px 8px',gap:'2px 0'}}>
+        {cells.map((cell,idx)=>{
+          const dstr = ds(cell.date);
+          const dow  = cell.date.getDay();
+          const isStart   = dstr===startVal;
+          const isEnd     = dstr===endVal;
+          const inRange   = startVal&&endVal&&dstr>startVal&&dstr<endVal;
+          const isToday   = dstr===todayStr;
+          const isOther   = cell.other;
+          const isSingle  = isStart&&isEnd;
+
+          let bg='transparent', color='var(--text)', borderRadius='6px', border='none';
+          if(isStart||isEnd){
+            bg='var(--accent)'; color='var(--bg)';
+            borderRadius = isSingle?'6px':isStart?'6px 0 0 6px':'0 6px 6px 0';
+          } else if(inRange){
+            bg='rgba(232,255,71,0.15)'; color='var(--text)'; borderRadius='0';
+          }
+          if(isOther){ color='var(--text3)'; bg='transparent'; borderRadius='6px'; }
+
+          return (
+            <div key={idx} onClick={()=>handleDayClick(dstr,isOther)}
+              style={{
+                textAlign:'center', fontSize:12, fontWeight: isStart||isEnd?700:isToday?600:400,
+                padding:'5px 0', cursor: isOther?'default':'pointer',
+                opacity: isOther?0.25:1,
+                background:bg, color, borderRadius, border,
+                outline: isToday&&!isStart&&!isEnd?'1px solid var(--accent)':'none',
+                outlineOffset:'-1px',
+                transition:'background 0.1s',
+                userSelect:'none',
+              }}>
+              {cell.date.getDate()}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function TaskModal({task,backlogs,defaultBlId,prefill,onSave,onDelete,onClose}) {
   // periods: [{start,end}, ...] に統一して管理
   const initPeriods = React.useMemo(()=>{
@@ -149,31 +284,25 @@ function TaskModal({task,backlogs,defaultBlId,prefill,onSave,onDelete,onClose}) 
   const [confirmDelete,setConfirmDelete] = React.useState(false);
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
 
-  function setPeriod(i,k,v){
-    setPeriods(ps=>ps.map((p,j)=>j===i?{...p,[k]:v}:p));
-  }
+  function setPeriod(i,k,v){ setPeriods(ps=>ps.map((p,j)=>j===i?{...p,[k]:v}:p)); }
   function addPeriod(){
     const last=periods[periods.length-1];
-    const newStart=ds(addD(new Date(last.end),2));
-    const newEnd=ds(addD(new Date(last.end),8));
-    setPeriods(ps=>[...ps,{start:newStart,end:newEnd}]);
+    setPeriods(ps=>[...ps,{start:ds(addD(new Date(last.end),2)),end:ds(addD(new Date(last.end),8))}]);
   }
   function removePeriod(i){
     if(periods.length<=1) return;
     setPeriods(ps=>ps.filter((_,j)=>j!==i));
   }
-
   function handleSave(){
     if(!form.title) return;
     const sorted=[...periods].sort((a,b)=>a.start<b.start?-1:1);
-    // 後方互換: start/end も保持
     onSave({...form, id:task?.id, periods:sorted, start:sorted[0].start, end:sorted[sorted.length-1].end});
   }
 
   return (
     <>
     <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div className="modal">
+      <div className="modal" style={{maxHeight:'90vh',overflowY:'auto'}}>
         <div className="modal-title">{task?'タスクを編集':'新しいタスク'}</div>
         <div className="form-group">
           <label className="form-label">バックログ</label>
@@ -207,16 +336,20 @@ function TaskModal({task,backlogs,defaultBlId,prefill,onSave,onDelete,onClose}) 
             </button>
           </label>
           {periods.map((p,i)=>(
-            <div key={i} style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}>
-              <span style={{fontSize:11,color:'var(--text3)',fontFamily:'var(--mono)',minWidth:16,textAlign:'right'}}>{i+1}</span>
-              <input type="date" className="form-input" style={{flex:1}} value={p.start} onChange={e=>setPeriod(i,'start',e.target.value)}/>
-              <span style={{color:'var(--text3)',fontSize:12}}>→</span>
-              <input type="date" className="form-input" style={{flex:1}} value={p.end} onChange={e=>setPeriod(i,'end',e.target.value)}/>
+            <div key={i} style={{marginBottom:i<periods.length-1?12:0}}>
               {periods.length>1&&(
-                <button onClick={()=>removePeriod(i)} style={{
-                  width:22,height:22,border:'none',background:'rgba(255,80,80,0.12)',color:'#ff5050',
-                  borderRadius:4,cursor:'pointer',fontSize:13,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}>×</button>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:4}}>
+                  <span style={{fontSize:11,color:'var(--text3)',fontFamily:'var(--mono)',fontWeight:700}}>期間 {i+1}</span>
+                  <button onClick={()=>removePeriod(i)} style={{
+                    fontSize:11,padding:'1px 8px',borderRadius:4,border:'none',
+                    background:'rgba(255,80,80,0.12)',color:'#ff5050',cursor:'pointer',fontFamily:'var(--font)'}}>× 削除</button>
+                </div>
               )}
+              <DateRangePicker
+                startVal={p.start} endVal={p.end}
+                onChangeStart={v=>setPeriod(i,'start',v)}
+                onChangeEnd={v=>setPeriod(i,'end',v)}
+              />
             </div>
           ))}
         </div>
@@ -926,13 +1059,33 @@ function CalendarView({backlogs,tasks,onEditTask}) {
      components/App.jsx
      ============================================================ -->
 <script type="text/babel">
+const LS_BL  = 'taskflow_backlogs';
+const LS_TASKS = 'taskflow_tasks';
+function lsGet(key, fallback) {
+  try { const v=localStorage.getItem(key); return v?JSON.parse(v):fallback; }
+  catch(e) { return fallback; }
+}
+function lsSet(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch(e) {}
+}
+
 function App() {
-  const [backlogs,setBacklogs]=React.useState(INIT_BL);
-  const [tasks,setTasks]=React.useState(()=>_initTasks());
+  const [backlogs,setBacklogs]=React.useState(()=>lsGet(LS_BL, INIT_BL));
+  const [tasks,setTasks]=React.useState(()=>lsGet(LS_TASKS, _initTasks()));
   const [view,setView]=React.useState('kanban');
   const [taskModal,setTaskModal]=React.useState(null);
   const [blModal,setBlModal]=React.useState(null);
   const [showHelp,setShowHelp]=React.useState(false);
+  const [saveIndicator,setSaveIndicator]=React.useState(false);
+
+  // backlogs・tasks が変わるたびに localStorage に保存
+  React.useEffect(()=>{ lsSet(LS_BL, backlogs); },[backlogs]);
+  React.useEffect(()=>{
+    lsSet(LS_TASKS, tasks);
+    setSaveIndicator(true);
+    const t=setTimeout(()=>setSaveIndicator(false),1200);
+    return ()=>clearTimeout(t);
+  },[tasks]);
 
   function saveBl(form){
     setBacklogs(bs=>{
@@ -967,6 +1120,11 @@ function App() {
         </div>
         <div className="spacer"/>
         <span className="hdr-count">{tasks.length} tasks</span>
+        {saveIndicator&&(
+          <span style={{fontSize:11,color:'var(--done)',fontFamily:'var(--mono)',display:'flex',alignItems:'center',gap:4}}>
+            ✓ 保存済み
+          </span>
+        )}
         <button className="help-btn" onClick={()=>setShowHelp(true)}>?</button>
       </div>
       <div className="main">
